@@ -11,6 +11,8 @@ from .nodes import (
     BinaryExpression,
     UnaryExpression,
     FunctionCall,
+    IfStatement,
+    WhileStatement,
 )
 
 __all__ = [
@@ -26,4 +28,6 @@ __all__ = [
     "BinaryExpression",
     "UnaryExpression",
     "FunctionCall",
+    "IfStatement",
+    "WhileStatement",
 ]
