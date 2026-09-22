@@ -1,0 +1,225 @@
+(* ============================================================
+   CARDINAL Language Grammar
+   Version: 0.1
+   ============================================================ *)
+
+program         = { declaration } ;
+
+declaration     = agent_decl
+                | function_decl
+                | variable_decl
+                | import_decl
+                ;
+
+(* ------------------------------------------------------------
+   Agents
+   ------------------------------------------------------------ *)
+
+agent_decl      = "agent" , identifier , [ ":" , identifier ] ,
+                  "{" , { agent_member } , "}" ;
+
+agent_member    = variable_decl
+                | function_decl
+                | behavior_decl
+                ;
+
+behavior_decl   = "behavior" , identifier ,
+                  "{" , { statement } , "}" ;
+
+(* ------------------------------------------------------------
+   Functions
+   ------------------------------------------------------------ *)
+
+function_decl   = "fn" , identifier ,
+                  "(" , [ parameter_list ] , ")" ,
+                  [ "->" , type ] ,
+                  block ;
+
+parameter_list  = parameter , { "," , parameter } ;
+
+parameter       = identifier , ":" , type ;
+
+(* ------------------------------------------------------------
+   Variables
+   ------------------------------------------------------------ *)
+
+variable_decl   = [ "const" ] , "let" ,
+                  identifier ,
+                  [ ":" , type ] ,
+                  [ "=" , expression ] ,
+                  ";" ;
+
+(* ------------------------------------------------------------
+   Imports
+   ------------------------------------------------------------ *)
+
+import_decl     = "import" , module_path , ";" ;
+
+module_path     = identifier , { "::" , identifier } ;
+
+(* ------------------------------------------------------------
+   Statements
+   ------------------------------------------------------------ *)
+
+statement       = variable_decl
+                | expression_statement
+                | return_statement
+                | if_statement
+                | while_statement
+                | block
+                ;
+
+expression_statement = expression , ";" ;
+
+return_statement = "return" , [ expression ] , ";" ;
+
+if_statement    = "if" , expression ,
+                  block ,
+                  [ "else" , block ] ;
+
+while_statement = "while" , expression , block ;
+
+block           = "{" , { statement } , "}" ;
+
+(* ------------------------------------------------------------
+   Expressions
+   ------------------------------------------------------------ *)
+
+expression      = assignment ;
+
+assignment      = logical_or ,
+                  [ assignment_operator , assignment ] ;
+
+assignment_operator = "="
+                    | "+="
+                    | "-="
+                    | "*="
+                    | "/="
+                    ;
+
+logical_or      = logical_and ,
+                  { "||" , logical_and } ;
+
+logical_and     = equality ,
+                  { "&&" , equality } ;
+
+equality        = comparison ,
+                  { equality_operator , comparison } ;
+
+equality_operator = "=="
+                  | "!="
+                  ;
+
+comparison      = term ,
+                  { comparison_operator , term } ;
+
+comparison_operator = "<"
+                    | "<="
+                    | ">"
+                    | ">="
+                    ;
+
+term            = factor ,
+                  { term_operator , factor } ;
+
+term_operator   = "+"
+                | "-"
+                ;
+
+factor          = unary ,
+                  { factor_operator , unary } ;
+
+factor_operator = "*"
+                | "/"
+                | "%"
+                ;
+
+unary           = [ unary_operator ] , primary ;
+
+unary_operator  = "!"
+                | "-"
+                | "+"
+                ;
+
+primary         = literal
+                | identifier
+                | function_call
+                | "(" , expression , ")"
+                ;
+
+function_call   = identifier ,
+                  "(" , [ argument_list ] , ")" ;
+
+argument_list   = expression ,
+                  { "," , expression } ;
+
+(* ------------------------------------------------------------
+   Literals
+   ------------------------------------------------------------ *)
+
+literal         = integer
+                | float
+                | string
+                | boolean
+                | "null"
+                ;
+
+integer         = digit , { digit } ;
+
+float           = digit , { digit } ,
+                  "." ,
+                  digit , { digit } ;
+
+string          = '"' , { string_character } , '"' ;
+
+boolean         = "true"
+                | "false"
+                ;
+
+(* ------------------------------------------------------------
+   Types
+   ------------------------------------------------------------ *)
+
+type            = primitive_type
+                | identifier
+                ;
+
+primitive_type  = "Int"
+                | "Float"
+                | "Bool"
+                | "String"
+                | "Unit"
+                | "Any"
+                ;
+
+(* ------------------------------------------------------------
+   Identifiers
+   ------------------------------------------------------------ *)
+
+identifier      = letter , { letter | digit | "_" } ;
+
+letter          = "A" | "B" | "C" | "D" | "E" | "F" | "G"
+                | "H" | "I" | "J" | "K" | "L" | "M"
+                | "N" | "O" | "P" | "Q" | "R" | "S"
+                | "T" | "U" | "V" | "W" | "X" | "Y" | "Z"
+                | "a" | "b" | "c" | "d" | "e" | "f" | "g"
+                | "h" | "i" | "j" | "k" | "l" | "m"
+                | "n" | "o" | "p" | "q" | "r" | "s"
+                | "t" | "u" | "v" | "w" | "x" | "y"
+                | "z"
+                ;
+
+digit           = "0" | "1" | "2" | "3" | "4"
+                | "5" | "6" | "7" | "8" | "9" ;
+
+string_character = ? any character except '"' ? ;
+
+(* ------------------------------------------------------------
+   Comments
+   ------------------------------------------------------------ *)
+
+comment         = line_comment | block_comment ;
+
+line_comment    = "//" , { ? any character except newline ? } ;
+
+block_comment   = "/*" , { ? any character ? } , "*/" ;
