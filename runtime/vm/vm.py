@@ -88,6 +88,14 @@ class VM:
                     if self.stack
                     else None
                 )
+
+            elif opcode == OpCode.CALL:
+                function.name = instruction.operand
+
+                raise VMError(
+                    f"Function calls are not implemented yet: "
+                    f"{function_name}"
+                )
                 return self.return_value
 
             elif opcode == OpCode.HALT:
