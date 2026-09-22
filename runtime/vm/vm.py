@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from compiler.ir import IRFunction, IRModule, OpCode
+
 from .frame import CallFrame
 
 
@@ -12,7 +13,6 @@ class VM:
     """Stack-based virtual machine for CARDINAL IR."""
 
     def __init__(self) -> None:
-        self.stack: list[object] = []
         self.frames: list[CallFrame] = []
         self.return_value: object | None = None
 
@@ -21,21 +21,22 @@ class VM:
         function: IRFunction,
         module: IRModule | None = None,
     ) -> object | None:
-        self.stack.clear()
         self.frames.clear()
         self.return_value = None
 
-        frame = CallFrame(
-            function_name=function.name,
-        )
-
+        frame = CallFrame(function_name=function.name)
         self.frames.append(frame)
 
-        return self._execute_function(
+        result = self._execute_function(
             function,
             module,
             frame,
         )
+
+        self.return_value = result
+        self.frames.clear()
+
+        return result
 
     def _execute_function(
         self,
@@ -46,36 +47,28 @@ class VM:
         instructions = function.instructions
 
         while frame.instruction_pointer < len(instructions):
-            instruction = instructions[
-                frame.instruction_pointer
-            ]
-
+            instruction = instructions[frame.instruction_pointer]
             opcode = instruction.opcode
+            stack = frame.operand_stack
 
             if opcode == OpCode.CONSTANT:
-                self.stack.append(
-                    instruction.operand
-                )
+                stack.append(instruction.operand)
 
             elif opcode == OpCode.LOAD:
                 name = instruction.operand
 
                 if not isinstance(name, str):
-                    raise VMError(
-                        "LOAD requires a variable name"
-                    )
+                    raise VMError("LOAD requires a variable name")
 
                 if name not in frame.locals:
                     raise VMError(
                         f"Undefined variable: {name}"
                     )
 
-                self.stack.append(
-                    frame.locals[name]
-                )
+                stack.append(frame.locals[name])
 
             elif opcode == OpCode.STORE:
-                if not self.stack:
+                if not stack:
                     raise VMError(
                         "Stack underflow during STORE"
                     )
@@ -87,10 +80,10 @@ class VM:
                         "STORE requires a variable name"
                     )
 
-                frame.locals[name] = self.stack.pop()
+                frame.locals[name] = stack.pop()
 
             elif opcode == OpCode.ASSIGN:
-                if not self.stack:
+                if not stack:
                     raise VMError(
                         "Stack underflow during ASSIGN"
                     )
@@ -102,71 +95,50 @@ class VM:
                         "ASSIGN requires a variable name"
                     )
 
-                frame.locals[name] = self.stack.pop()
+                frame.locals[name] = stack.pop()
 
             elif opcode == OpCode.ADD:
-                self._binary(
-                    lambda a, b: a + b
-                )
+                self._binary(frame, lambda a, b: a + b)
 
             elif opcode == OpCode.SUB:
-                self._binary(
-                    lambda a, b: a - b
-                )
+                self._binary(frame, lambda a, b: a - b)
 
             elif opcode == OpCode.MUL:
-                self._binary(
-                    lambda a, b: a * b
-                )
+                self._binary(frame, lambda a, b: a * b)
 
             elif opcode == OpCode.DIV:
-                self._binary(
-                    lambda a, b: a / b
-                )
+                self._binary(frame, lambda a, b: a / b)
 
             elif opcode == OpCode.MOD:
-                self._binary(
-                    lambda a, b: a % b
-                )
+                self._binary(frame, lambda a, b: a % b)
 
             elif opcode == OpCode.EQUAL:
-                self._binary(
-                    lambda a, b: a == b
-                )
+                self._binary(frame, lambda a, b: a == b)
 
             elif opcode == OpCode.NOT_EQUAL:
-                self._binary(
-                    lambda a, b: a != b
-                )
+                self._binary(frame, lambda a, b: a != b)
 
             elif opcode == OpCode.LESS:
-                self._binary(
-                    lambda a, b: a < b
-                )
+                self._binary(frame, lambda a, b: a < b)
 
             elif opcode == OpCode.LESS_EQUAL:
-                self._binary(
-                    lambda a, b: a <= b
-                )
+                self._binary(frame, lambda a, b: a <= b)
 
             elif opcode == OpCode.GREATER:
-                self._binary(
-                    lambda a, b: a > b
-                )
+                self._binary(frame, lambda a, b: a > b)
 
             elif opcode == OpCode.GREATER_EQUAL:
-                self._binary(
-                    lambda a, b: a >= b
-                )
+                self._binary(frame, lambda a, b: a >= b)
 
             elif opcode == OpCode.CALL:
                 result = self._call(
                     instruction,
                     module,
+                    frame,
                 )
 
                 if result is not None:
-                    self.stack.append(result)
+                    stack.append(result)
 
             elif opcode == OpCode.JUMP:
                 frame.instruction_pointer = int(
@@ -175,13 +147,12 @@ class VM:
                 continue
 
             elif opcode == OpCode.JUMP_IF_FALSE:
-                if not self.stack:
+                if not stack:
                     raise VMError(
-                        "Stack underflow during "
-                        "JUMP_IF_FALSE"
+                        "Stack underflow during JUMP_IF_FALSE"
                     )
 
-                condition = self.stack.pop()
+                condition = stack.pop()
 
                 if not condition:
                     frame.instruction_pointer = int(
@@ -190,23 +161,16 @@ class VM:
                     continue
 
             elif opcode == OpCode.RETURN:
-                result = (
-                    self.stack.pop()
-                    if self.stack
-                    else None
-                )
-
+                result = stack.pop() if stack else None
                 frame.return_value = result
 
-                if self.frames:
+                if self.frames and self.frames[-1] is frame:
                     self.frames.pop()
-
-                self.return_value = result
 
                 return result
 
             elif opcode == OpCode.HALT:
-                return self.return_value
+                return None
 
             else:
                 raise VMError(
@@ -221,6 +185,7 @@ class VM:
         self,
         instruction,
         module: IRModule | None,
+        caller_frame: CallFrame,
     ) -> object | None:
         if module is None:
             raise VMError(
@@ -248,11 +213,9 @@ class VM:
                 f"Unknown function: {function_name}"
             )
 
-        argument_count = len(
-            target.parameters
-        )
+        argument_count = len(target.parameters)
 
-        if len(self.stack) < argument_count:
+        if len(caller_frame.operand_stack) < argument_count:
             raise VMError(
                 f"Not enough arguments for "
                 f"function '{function_name}'"
@@ -261,11 +224,11 @@ class VM:
         if argument_count == 0:
             arguments = []
         else:
-            arguments = self.stack[
+            arguments = caller_frame.operand_stack[
                 -argument_count:
             ]
 
-            del self.stack[
+            del caller_frame.operand_stack[
                 -argument_count:
             ]
 
@@ -287,24 +250,26 @@ class VM:
             frame,
         )
 
-    def _binary(self, operation) -> None:
-        if len(self.stack) < 2:
+    def _binary(
+        self,
+        frame: CallFrame,
+        operation,
+    ) -> None:
+        stack = frame.operand_stack
+
+        if len(stack) < 2:
             raise VMError(
-                "Stack underflow during "
-                "binary operation"
+                "Stack underflow during binary operation"
             )
 
-        right = self.stack.pop()
-        left = self.stack.pop()
+        right = stack.pop()
+        left = stack.pop()
 
         try:
-            result = operation(
-                left,
-                right,
-            )
+            result = operation(left, right)
         except Exception as exc:
             raise VMError(
                 f"Binary operation failed: {exc}"
             ) from exc
 
-        self.stack.append(result)
+        stack.append(result)
