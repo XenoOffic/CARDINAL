@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from language.ast import (
     AgentDeclaration,
+    AssignmentExpression,
     BehaviorDeclaration,
     BinaryExpression,
     FunctionCall,
     FunctionDeclaration,
     Identifier,
+    IfStatement,
     Literal,
     Program,
     ReturnStatement,
     UnaryExpression,
     VariableDeclaration,
-    IfStatement,
     WhileStatement,
 )
 from language.lexer import Lexer, Token, TokenType
@@ -56,10 +57,16 @@ class Parser:
             return self._variable_declaration(False)
 
         if self._match(TokenType.CONST):
-            self._consume(TokenType.LET, "Expected 'let' after 'const'.")
+            self._consume(
+                TokenType.LET,
+                "Expected 'let' after 'const'.",
+            )
             return self._variable_declaration(True)
 
-        raise self._error(self._peek(), "Expected declaration.")
+        raise self._error(
+            self._peek(),
+            "Expected declaration.",
+        )
 
     def _agent_declaration(self) -> AgentDeclaration:
         name = self._consume(
@@ -82,19 +89,30 @@ class Parser:
 
         members = []
 
-        while not self._check(TokenType.RBRACE) and not self._is_at_end():
+        while (
+            not self._check(TokenType.RBRACE)
+            and not self._is_at_end()
+        ):
             if self._match(TokenType.BEHAVIOR):
                 members.append(self._behavior_declaration())
+
             elif self._match(TokenType.FN):
                 members.append(self._function_declaration())
+
             elif self._match(TokenType.LET):
-                members.append(self._variable_declaration(False))
+                members.append(
+                    self._variable_declaration(False)
+                )
+
             elif self._match(TokenType.CONST):
                 self._consume(
                     TokenType.LET,
                     "Expected 'let' after 'const'.",
                 )
-                members.append(self._variable_declaration(True))
+                members.append(
+                    self._variable_declaration(True)
+                )
+
             else:
                 raise self._error(
                     self._peek(),
@@ -263,7 +281,10 @@ class Parser:
 
         statements = []
 
-        while not self._check(TokenType.RBRACE) and not self._is_at_end():
+        while (
+            not self._check(TokenType.RBRACE)
+            and not self._is_at_end()
+        ):
             statements.append(self._statement())
 
         self._consume(
@@ -273,42 +294,31 @@ class Parser:
 
         return statements
 
-    def _if_statement(self):
-        def _if_statement(self):
-    self._consume(TokenType.IF, "Expected 'if'.")
+    def _if_statement(self) -> IfStatement:
+        condition = self._expression()
 
-    condition = self._expression()
+        then_body = self._block()
 
-    then_body = self._block()
+        else_body = []
 
-    else_body = []
+        if self._match(TokenType.ELSE):
+            else_body = self._block()
 
-    if self._match(TokenType.ELSE):
-        else_body = self._block()
+        return IfStatement(
+            condition=condition,
+            then_body=then_body,
+            else_body=else_body,
+        )
 
-    return IfStatement(
-        condition=condition,
-        then_body=then_body,
-        else_body=else_body,
-    )
+    def _while_statement(self) -> WhileStatement:
+        condition = self._expression()
 
-    def _while_statement(self):
-        self._consume(TokenType.WHILE, "Expected 'while'.")
+        body = self._block()
 
-    condition = self._expression()
-
-    body = self._block()
-
-    return WhileStatement(
-        condition=condition,
-        body=body,
-    )
-
-        return {
-            "type": "while",
-            "condition": condition,
-            "body": body,
-        }
+        return WhileStatement(
+            condition=condition,
+            body=body,
+        )
 
     # ---------------------------------------------------------
     # Expressions
@@ -330,10 +340,16 @@ class Parser:
             operator = self._previous().lexeme
             value = self._assignment()
 
-            return BinaryExpression(
-                left=expression,
+            if not isinstance(expression, Identifier):
+                raise self._error(
+                    self._previous(),
+                    "Invalid assignment target.",
+                )
+
+            return AssignmentExpression(
+                target=expression.name,
                 operator=operator,
-                right=value,
+                value=value,
             )
 
         return expression
@@ -583,7 +599,10 @@ class Parser:
         if self._check(token_type):
             return self._advance()
 
-        raise self._error(self._peek(), message)
+        raise self._error(
+            self._peek(),
+            message,
+        )
 
     def _consume_any(
         self,
@@ -593,10 +612,18 @@ class Parser:
         if self._peek().type in token_types:
             return self._advance()
 
-        raise self._error(self._peek(), message)
+        raise self._error(
+            self._peek(),
+            message,
+        )
 
-    def _error(self, token: Token, message: str) -> SyntaxError:
+    def _error(
+        self,
+        token: Token,
+        message: str,
+    ) -> SyntaxError:
         return SyntaxError(
-            f"{token.line}:{token.column}: parser error: {message} "
+            f"{token.line}:{token.column}: "
+            f"parser error: {message} "
             f"(found {token.type.name})"
-          )
+        )
