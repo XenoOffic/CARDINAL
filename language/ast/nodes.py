@@ -91,7 +91,7 @@ class WhileStatement(ASTNode):
     body: list[ASTNode] = field(default_factory=list)
 
 @dataclass
-class AssigmentExpression(ASTNode):
+class AssignmentExpression(ASTNode):
     target: str
     operator: str
     value: ASTNode
