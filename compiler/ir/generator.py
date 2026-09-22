@@ -1,10 +1,8 @@
 from __future__ import annotations
-from language.ast import (
-    AssignmentExpression
-)
 
 from language.ast import (
     AgentDeclaration,
+    AssignmentExpression,
     BinaryExpression,
     FunctionCall,
     FunctionDeclaration,
@@ -37,8 +35,10 @@ class IRGenerator:
         for declaration in program.declarations:
             if isinstance(declaration, FunctionDeclaration):
                 self._function(declaration)
+
             elif isinstance(declaration, AgentDeclaration):
                 self._agent(declaration)
+
             else:
                 self._declaration(declaration)
 
@@ -84,14 +84,14 @@ class IRGenerator:
         if isinstance(node, VariableDeclaration):
             self._variable(node)
 
+        elif isinstance(node, AssignmentExpression):
+            self._expression(node)
+
         elif isinstance(node, IfStatement):
             self._if_statement(node)
 
         elif isinstance(node, WhileStatement):
             self._while_statement(node)
-
-        elif isinstance(node, AssignmentExpression):
-            self._expression(node)
 
         elif isinstance(node, ReturnStatement):
             self._return(node)
@@ -111,7 +111,11 @@ class IRGenerator:
         if node.value is not None:
             self._expression(node.value)
 
-        self._emit(Instruction(OpCode.RETURN))
+        self._emit(
+            Instruction(
+                OpCode.RETURN
+            )
+        )
 
     def _expression(self, node) -> None:
         if isinstance(node, Literal):
@@ -132,7 +136,7 @@ class IRGenerator:
             )
             return
 
-        if isinstance(node, AlignmentExpression):
+        if isinstance(node, AssignmentExpression):
             self._assignment(node)
             return
 
@@ -268,31 +272,57 @@ class IRGenerator:
             loop_end,
         )
 
-    def _assignment(self, expression: AssignmentExpression) -> None:
-    if expression.operator == "=":
-        self._expression(expression.value)
-        self._emit(OpCode.ASSIGN, expression.target)
-        return
+    def _assignment(
+        self,
+        expression: AssignmentExpression,
+    ) -> None:
+        if expression.operator == "=":
+            self._expression(expression.value)
 
-    self._emit(OpCode.LOAD, expression.target)
-    self._expression(expression.value)
+            self._emit(
+                Instruction(
+                    OpCode.ASSIGN,
+                    expression.target,
+                )
+            )
+            return
 
-    operator_map = {
-        "+=": OpCode.ADD,
-        "-=": OpCode.SUB,
-        "*=": OpCode.MUL,
-        "/=": OpCode.DIV,
-    }
-
-    opcode = operator_map.get(expression.operator)
-
-    if opcode is None:
-        raise ValueError(
-            f"Unsupported assignment operator: {expression.operator}"
+        self._emit(
+            Instruction(
+                OpCode.LOAD,
+                expression.target,
+            )
         )
 
-    self._emit(opcode)
-    self._emit(OpCode.ASSIGN, expression.target)
+        self._expression(expression.value)
+
+        operator_map = {
+            "+=": OpCode.ADD,
+            "-=": OpCode.SUB,
+            "*=": OpCode.MUL,
+            "/=": OpCode.DIV,
+        }
+
+        opcode = operator_map.get(
+            expression.operator
+        )
+
+        if opcode is None:
+            raise ValueError(
+                "Unsupported assignment operator: "
+                f"{expression.operator}"
+            )
+
+        self._emit(
+            Instruction(opcode)
+        )
+
+        self._emit(
+            Instruction(
+                OpCode.ASSIGN,
+                expression.target,
+            )
+        )
 
     def _binary_opcode(self, operator: str) -> OpCode:
         operators = {
