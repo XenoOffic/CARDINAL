@@ -293,8 +293,16 @@ class Parser:
     )
 
     def _while_statement(self):
-        condition = self._expression()
-        body = self._block()
+        self._consume(TokenType.WHILE, "Expected 'while'.")
+
+    condition = self._expression()
+
+    body = self._block()
+
+    return WhileStatement(
+        condition=condition,
+        body=body,
+    )
 
         return {
             "type": "while",
