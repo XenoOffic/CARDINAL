@@ -76,3 +76,16 @@ class UnaryExpression(ASTNode):
 class FunctionCall(ASTNode):
     name: str
     arguments: list[ASTNode] = field(default_factory=list)
+
+
+@dataclass
+class IfStatement(ASTNode):
+    condition: ASTNode
+    then_body: list[ASTNode] = field(default_factory=list)
+    else_body: list[ASTNode] = field(default_factory=list)
+
+
+@dataclass
+class WhileStatement(ASTNode):
+    condition: ASTNode
+    body: list[ASTNode] = field(default_factory=list)
