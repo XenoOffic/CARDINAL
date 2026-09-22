@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from compiler.ir import IRFunction, IRModule, OpCode
+from .frame import CallFrame
 
 
 class VMError(Exception):
@@ -12,7 +13,7 @@ class VM:
 
     def __init__(self) -> None:
         self.stack: list[object] = []
-        self.variables: dict[str, object] = {}
+        self.frames: list[CallFrame] = []
         self.return_value: object | None = None
 
     def execute(
@@ -21,38 +22,57 @@ class VM:
         module: IRModule | None = None,
     ) -> object | None:
         self.stack.clear()
-        self.variables.clear()
+        self.frames.clear()
         self.return_value = None
 
-        return self._execute_function(function, module)
+        frame = CallFrame(
+            function_name=function.name,
+        )
+
+        self.frames.append(frame)
+
+        return self._execute_function(
+            function,
+            module,
+            frame,
+        )
 
     def _execute_function(
         self,
         function: IRFunction,
         module: IRModule | None,
+        frame: CallFrame,
     ) -> object | None:
         instructions = function.instructions
-        instruction_pointer = 0
 
-        while instruction_pointer < len(instructions):
-            instruction = instructions[instruction_pointer]
+        while frame.instruction_pointer < len(instructions):
+            instruction = instructions[
+                frame.instruction_pointer
+            ]
+
             opcode = instruction.opcode
 
             if opcode == OpCode.CONSTANT:
-                self.stack.append(instruction.operand)
+                self.stack.append(
+                    instruction.operand
+                )
 
             elif opcode == OpCode.LOAD:
                 name = instruction.operand
 
                 if not isinstance(name, str):
-                    raise VMError("LOAD requires a variable name")
+                    raise VMError(
+                        "LOAD requires a variable name"
+                    )
 
-                if name not in self.variables:
+                if name not in frame.locals:
                     raise VMError(
                         f"Undefined variable: {name}"
                     )
 
-                self.stack.append(self.variables[name])
+                self.stack.append(
+                    frame.locals[name]
+                )
 
             elif opcode == OpCode.STORE:
                 if not self.stack:
@@ -63,9 +83,11 @@ class VM:
                 name = instruction.operand
 
                 if not isinstance(name, str):
-                    raise VMError("STORE requires a variable name")
+                    raise VMError(
+                        "STORE requires a variable name"
+                    )
 
-                self.variables[name] = self.stack.pop()
+                frame.locals[name] = self.stack.pop()
 
             elif opcode == OpCode.ASSIGN:
                 if not self.stack:
@@ -80,102 +102,74 @@ class VM:
                         "ASSIGN requires a variable name"
                     )
 
-                self.variables[name] = self.stack.pop()
+                frame.locals[name] = self.stack.pop()
 
             elif opcode == OpCode.ADD:
-                self._binary(lambda a, b: a + b)
+                self._binary(
+                    lambda a, b: a + b
+                )
 
             elif opcode == OpCode.SUB:
-                self._binary(lambda a, b: a - b)
+                self._binary(
+                    lambda a, b: a - b
+                )
 
             elif opcode == OpCode.MUL:
-                self._binary(lambda a, b: a * b)
+                self._binary(
+                    lambda a, b: a * b
+                )
 
             elif opcode == OpCode.DIV:
-                self._binary(lambda a, b: a / b)
+                self._binary(
+                    lambda a, b: a / b
+                )
 
             elif opcode == OpCode.MOD:
-                self._binary(lambda a, b: a % b)
+                self._binary(
+                    lambda a, b: a % b
+                )
 
             elif opcode == OpCode.EQUAL:
-                self._binary(lambda a, b: a == b)
+                self._binary(
+                    lambda a, b: a == b
+                )
 
             elif opcode == OpCode.NOT_EQUAL:
-                self._binary(lambda a, b: a != b)
+                self._binary(
+                    lambda a, b: a != b
+                )
 
             elif opcode == OpCode.LESS:
-                self._binary(lambda a, b: a < b)
+                self._binary(
+                    lambda a, b: a < b
+                )
 
             elif opcode == OpCode.LESS_EQUAL:
-                self._binary(lambda a, b: a <= b)
+                self._binary(
+                    lambda a, b: a <= b
+                )
 
             elif opcode == OpCode.GREATER:
-                self._binary(lambda a, b: a > b)
+                self._binary(
+                    lambda a, b: a > b
+                )
 
             elif opcode == OpCode.GREATER_EQUAL:
-                self._binary(lambda a, b: a >= b)
+                self._binary(
+                    lambda a, b: a >= b
+                )
 
             elif opcode == OpCode.CALL:
-                if module is None:
-                    raise VMError(
-                        "CALL requires an IR module."
-                    )
-
-                function_name = instruction.operand
-
-                if not isinstance(function_name, str):
-                    raise VMError(
-                        "CALL requires a function name"
-                    )
-
-                target = next(
-                    (
-                        item
-                        for item in module.functions
-                        if item.name == function_name
-                    ),
-                    None,
-                )
-
-                if target is None:
-                    raise VMError(
-                        f"Unknown function: {function_name}"
-                    )
-
-                argument_count = len(target.parameters)
-
-                if len(self.stack) < argument_count:
-                    raise VMError(
-                        f"Not enough arguments for "
-                        f"function '{function_name}'"
-                    )
-
-                if argument_count == 0:
-                    arguments = []
-                else:
-                    arguments = self.stack[
-                        -argument_count:
-                    ]
-                    del self.stack[-argument_count:]
-
-                previous_variables = self.variables
-
-                self.variables = dict(
-                    zip(target.parameters, arguments)
-                )
-
-                result = self._execute_function(
-                    target,
+                result = self._call(
+                    instruction,
                     module,
                 )
-
-                self.variables = previous_variables
 
                 if result is not None:
                     self.stack.append(result)
 
             elif opcode == OpCode.JUMP:
-                instruction_pointer = int(
+                frame.instruction_pointer = int(
                     instruction.operand
                 )
                 continue
@@ -183,25 +177,33 @@ class VM:
             elif opcode == OpCode.JUMP_IF_FALSE:
                 if not self.stack:
                     raise VMError(
-                        "Stack underflow during JUMP_IF_FALSE"
+                        "Stack underflow during "
+                        "JUMP_IF_FALSE"
                     )
 
                 condition = self.stack.pop()
 
                 if not condition:
-                    instruction_pointer = int(
+                    frame.instruction_pointer = int(
                         instruction.operand
                     )
                     continue
 
             elif opcode == OpCode.RETURN:
-                self.return_value = (
+                result = (
                     self.stack.pop()
                     if self.stack
                     else None
                 )
 
-                return self.return_value
+                frame.return_value = result
+
+                if self.frames:
+                    self.frames.pop()
+
+                self.return_value = result
+
+                return result
 
             elif opcode == OpCode.HALT:
                 return self.return_value
@@ -211,21 +213,95 @@ class VM:
                     f"Unsupported opcode: {opcode.name}"
                 )
 
-            instruction_pointer += 1
+            frame.instruction_pointer += 1
 
-        return self.return_value
+        return frame.return_value
+
+    def _call(
+        self,
+        instruction,
+        module: IRModule | None,
+    ) -> object | None:
+        if module is None:
+            raise VMError(
+                "CALL requires an IR module."
+            )
+
+        function_name = instruction.operand
+
+        if not isinstance(function_name, str):
+            raise VMError(
+                "CALL requires a function name"
+            )
+
+        target = next(
+            (
+                function
+                for function in module.functions
+                if function.name == function_name
+            ),
+            None,
+        )
+
+        if target is None:
+            raise VMError(
+                f"Unknown function: {function_name}"
+            )
+
+        argument_count = len(
+            target.parameters
+        )
+
+        if len(self.stack) < argument_count:
+            raise VMError(
+                f"Not enough arguments for "
+                f"function '{function_name}'"
+            )
+
+        if argument_count == 0:
+            arguments = []
+        else:
+            arguments = self.stack[
+                -argument_count:
+            ]
+
+            del self.stack[
+                -argument_count:
+            ]
+
+        frame = CallFrame(
+            function_name=function_name,
+            locals=dict(
+                zip(
+                    target.parameters,
+                    arguments,
+                )
+            ),
+        )
+
+        self.frames.append(frame)
+
+        return self._execute_function(
+            target,
+            module,
+            frame,
+        )
 
     def _binary(self, operation) -> None:
         if len(self.stack) < 2:
             raise VMError(
-                "Stack underflow during binary operation"
+                "Stack underflow during "
+                "binary operation"
             )
 
         right = self.stack.pop()
         left = self.stack.pop()
 
         try:
-            result = operation(left, right)
+            result = operation(
+                left,
+                right,
+            )
         except Exception as exc:
             raise VMError(
                 f"Binary operation failed: {exc}"
