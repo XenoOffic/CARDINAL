@@ -1,4 +1,7 @@
 from __future__ import annotations
+from language.ast import (
+    AssignmentExpression
+)
 
 from language.ast import (
     AgentDeclaration,
@@ -86,6 +89,9 @@ class IRGenerator:
 
         elif isinstance(node, WhileStatement):
             self._while_statement(node)
+
+        elif isinstance(node, AssignmentExpression):
+            self._expression(node)
 
         elif isinstance(node, ReturnStatement):
             self._return(node)
