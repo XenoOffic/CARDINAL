@@ -31,4 +31,4 @@ class CardinalPipeline:
             module.functions[0],
         )
 
-        return VM().execute(main)
+        return VM().execute(main, module)
