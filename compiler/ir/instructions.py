@@ -33,6 +33,8 @@ class OpCode(Enum):
 
     HALT = auto()
 
+    ASSIGN = auto()
+
 
 @dataclass(frozen=True)
 class Instruction:
