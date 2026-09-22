@@ -61,6 +61,12 @@ class Parser:
                 TokenType.LET,
                 "Expected 'let' after 'const'.",
             )
+
+        if self._match(TokenType.WHILE):
+            return self._while_statement()
+
+        if self._match(TokenType, IF):
+            return self._if_statement()
             return self._variable_declaration(True)
 
         raise self._error(
