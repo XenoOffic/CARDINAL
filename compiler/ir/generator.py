@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from language.ast import (
+    AgentDeclaration,
     BinaryExpression,
+    FunctionCall,
+    FunctionDeclaration,
     Identifier,
     Literal,
     Program,
@@ -27,12 +30,50 @@ class IRGenerator:
         self.current_function = main
 
         for declaration in program.declarations:
-            self._declaration(declaration)
+            if isinstance(declaration, FunctionDeclaration):
+                self._function(declaration)
+            elif isinstance(declaration, AgentDeclaration):
+                self._agent(declaration)
+            else:
+                self._declaration(declaration)
 
         main.emit(Instruction(OpCode.HALT))
         self.module.add_function(main)
 
         return self.module
+
+    def _function(self, node: FunctionDeclaration) -> None:
+        function = IRFunction(
+            name=node.name,
+            parameters=[
+                parameter.name
+                for parameter in node.parameters
+            ],
+        )
+
+        previous_function = self.current_function
+        self.current_function = function
+
+        for statement in node.body:
+            self._declaration(statement)
+
+        if not function.instructions or (
+            function.instructions[-1].opcode
+            != OpCode.RETURN
+        ):
+            function.emit(Instruction(OpCode.RETURN))
+
+        self.module.add_function(function)
+
+        self.current_function = previous_function
+
+    def _agent(self, node: AgentDeclaration) -> None:
+        for member in node.members:
+            if isinstance(member, FunctionDeclaration):
+                self._function(member)
+
+            elif isinstance(member, VariableDeclaration):
+                self._declaration(member)
 
     def _declaration(self, node) -> None:
         if isinstance(node, VariableDeclaration):
@@ -81,10 +122,22 @@ class IRGenerator:
             self._expression(node.left)
             self._expression(node.right)
 
-            opcode = self._binary_opcode(node.operator)
+            self._emit(
+                Instruction(
+                    self._binary_opcode(node.operator)
+                )
+            )
+            return
+
+        if isinstance(node, FunctionCall):
+            for argument in node.arguments:
+                self._expression(argument)
 
             self._emit(
-                Instruction(opcode)
+                Instruction(
+                    OpCode.CALL,
+                    node.name,
+                )
             )
             return
 
@@ -99,7 +152,6 @@ class IRGenerator:
             "*": OpCode.MUL,
             "/": OpCode.DIV,
             "%": OpCode.MOD,
-
             "==": OpCode.EQUAL,
             "!=": OpCode.NOT_EQUAL,
             "<": OpCode.LESS,
@@ -108,12 +160,12 @@ class IRGenerator:
             ">=": OpCode.GREATER_EQUAL,
         }
 
-        try:
-            return operators[operator]
-        except KeyError as exc:
+        if operator not in operators:
             raise ValueError(
                 f"Unsupported binary operator: {operator}"
-            ) from exc
+            )
+
+        return operators[operator]
 
     def _emit(self, instruction: Instruction) -> None:
         if self.current_function is None:
