@@ -44,6 +44,9 @@ class VM:
             elif opcode == OpCode.LOAD:
                 name = instruction.operand
 
+                if not isinstance(name, str):
+                    raise VMError("LOAD requires a variable name")
+
                 if name not in self.variables:
                     raise VMError(
                         f"Undefined variable: {name}"
@@ -58,6 +61,25 @@ class VM:
                     )
 
                 name = instruction.operand
+
+                if not isinstance(name, str):
+                    raise VMError("STORE requires a variable name")
+
+                self.variables[name] = self.stack.pop()
+
+            elif opcode == OpCode.ASSIGN:
+                if not self.stack:
+                    raise VMError(
+                        "Stack underflow during ASSIGN"
+                    )
+
+                name = instruction.operand
+
+                if not isinstance(name, str):
+                    raise VMError(
+                        "ASSIGN requires a variable name"
+                    )
+
                 self.variables[name] = self.stack.pop()
 
             elif opcode == OpCode.ADD:
@@ -99,34 +121,12 @@ class VM:
                         "CALL requires an IR module."
                     )
 
-            elif opcode == OpCode.ASSIGN:
-                if not self.stack:
-                    raise VMError("Stack underflow during ASSIGN")
-
-                    name = instruction.operand
-
-                    if not isinstance(name, str):
-                        raise VMError("ASSIGN requires a variable name")
-
-                    self.variables[name] = self.stack.pop()
-
-            elif opcode == OpCode.JUMP:
-                instruction_pointer = int(instruction.operand)
-                continue
-
-            elif opcode == OpCode.JUMP_IF_FALSE:
-                if not self.stack:
-                    raise VMError(
-                        "Stack underflow during JUMP_IF_FALSE"
-                    )
-
-                condition = self.stack.pop()
-
-                if not condition:
-                    instruction_pointer = int(instruction.operand)
-                    continue
-
                 function_name = instruction.operand
+
+                if not isinstance(function_name, str):
+                    raise VMError(
+                        "CALL requires a function name"
+                    )
 
                 target = next(
                     (
@@ -150,13 +150,16 @@ class VM:
                         f"function '{function_name}'"
                     )
 
-                arguments = self.stack[
-                    -argument_count:
-                ]
-
-                del self.stack[-argument_count:]
+                if argument_count == 0:
+                    arguments = []
+                else:
+                    arguments = self.stack[
+                        -argument_count:
+                    ]
+                    del self.stack[-argument_count:]
 
                 previous_variables = self.variables
+
                 self.variables = dict(
                     zip(target.parameters, arguments)
                 )
@@ -170,6 +173,26 @@ class VM:
 
                 if result is not None:
                     self.stack.append(result)
+
+            elif opcode == OpCode.JUMP:
+                instruction_pointer = int(
+                    instruction.operand
+                )
+                continue
+
+            elif opcode == OpCode.JUMP_IF_FALSE:
+                if not self.stack:
+                    raise VMError(
+                        "Stack underflow during JUMP_IF_FALSE"
+                    )
+
+                condition = self.stack.pop()
+
+                if not condition:
+                    instruction_pointer = int(
+                        instruction.operand
+                    )
+                    continue
 
             elif opcode == OpCode.RETURN:
                 self.return_value = (
