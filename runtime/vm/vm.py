@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from compiler.ir import IRFunction, OpCode
+from compiler.ir import IRFunction, IRModule, OpCode
 
 
 class VMError(Exception):
@@ -15,13 +15,24 @@ class VM:
         self.variables: dict[str, object] = {}
         self.return_value: object | None = None
 
-    def execute(self, function: IRFunction) -> object | None:
+    def execute(
+        self,
+        function: IRFunction,
+        module: IRModule | None = None,
+    ) -> object | None:
         self.stack.clear()
         self.variables.clear()
         self.return_value = None
 
-        instruction_pointer = 0
+        return self._execute_function(function, module)
+
+    def _execute_function(
+        self,
+        function: IRFunction,
+        module: IRModule | None,
+    ) -> object | None:
         instructions = function.instructions
+        instruction_pointer = 0
 
         while instruction_pointer < len(instructions):
             instruction = instructions[instruction_pointer]
@@ -82,6 +93,57 @@ class VM:
             elif opcode == OpCode.GREATER_EQUAL:
                 self._binary(lambda a, b: a >= b)
 
+            elif opcode == OpCode.CALL:
+                if module is None:
+                    raise VMError(
+                        "CALL requires an IR module."
+                    )
+
+                function_name = instruction.operand
+
+                target = next(
+                    (
+                        item
+                        for item in module.functions
+                        if item.name == function_name
+                    ),
+                    None,
+                )
+
+                if target is None:
+                    raise VMError(
+                        f"Unknown function: {function_name}"
+                    )
+
+                argument_count = len(target.parameters)
+
+                if len(self.stack) < argument_count:
+                    raise VMError(
+                        f"Not enough arguments for "
+                        f"function '{function_name}'"
+                    )
+
+                arguments = self.stack[
+                    -argument_count:
+                ]
+
+                del self.stack[-argument_count:]
+
+                previous_variables = self.variables
+                self.variables = dict(
+                    zip(target.parameters, arguments)
+                )
+
+                result = self._execute_function(
+                    target,
+                    module,
+                )
+
+                self.variables = previous_variables
+
+                if result is not None:
+                    self.stack.append(result)
+
             elif opcode == OpCode.RETURN:
                 self.return_value = (
                     self.stack.pop()
@@ -89,13 +151,6 @@ class VM:
                     else None
                 )
 
-            elif opcode == OpCode.CALL:
-                function.name = instruction.operand
-
-                raise VMError(
-                    f"Function calls are not implemented yet: "
-                    f"{function_name}"
-                )
                 return self.return_value
 
             elif opcode == OpCode.HALT:
