@@ -94,10 +94,6 @@ class Lexer:
             ",": TokenType.COMMA,
             ":": TokenType.COLON,
             ";": TokenType.SEMICOLON,
-            "+": TokenType.PLUS,
-            "-": TokenType.MINUS,
-            "*": TokenType.STAR,
-            "%": TokenType.PERCENT,
         }
 
         if char in single_character_tokens:
