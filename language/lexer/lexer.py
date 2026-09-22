@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from .token import Token, TokenType
 
+from .errors import LexerError
+
 
 KEYWORDS = {
     "agent": TokenType.AGENT,
@@ -306,7 +308,8 @@ class Lexer:
         )
 
     def _error(self, message: str) -> None:
-        raise SyntaxError(
-            f"Lexer error at line {self.line}, "
-            f"column {self.column}: {message}"
-  )
+        raise LexerError(
+            message,
+            self.line,
+            self.column,
+        )
