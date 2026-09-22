@@ -13,6 +13,7 @@ from .nodes import (
     FunctionCall,
     IfStatement,
     WhileStatement,
+    AssigmentExpression,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "FunctionCall",
     "IfStatement",
     "WhileStatement",
+    "AssigmentExpression",
 ]
