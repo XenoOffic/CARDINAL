@@ -99,6 +99,22 @@ class VM:
                         "CALL requires an IR module."
                     )
 
+            elif opcode == OpCode.JUMP:
+                instruction_pointer = int(instruction.operand)
+                continue
+
+            elif opcode == OpCode.JUMP_IF_FALSE:
+                if not self.stack:
+                    raise VMError(
+                        "Stack underflow during JUMP_IF_FALSE"
+                    )
+
+                condition = self.stack.pop()
+
+                if not condition:
+                    instruction_pointer = int(instruction.operand)
+                    continue
+
                 function_name = instruction.operand
 
                 target = next(
