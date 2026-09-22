@@ -546,12 +546,3 @@ License
 CARDINAL is distributed under the MIT License.
 
 See the LICENSE file for the complete license text.
-
-A questo punto la base del repository è:
-
-```text
-CARDINAL/
-├── .gitignore
-├── CONTRIBUTING.md
-├── LICENSE
-└── README.md
