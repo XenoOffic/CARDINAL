@@ -1,0 +1,8 @@
+agent HelloAgent {
+
+    behavior greet {
+        let message: String = "Hello, CARDINAL";
+        return;
+    }
+
+}
