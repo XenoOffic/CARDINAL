@@ -89,3 +89,9 @@ class IfStatement(ASTNode):
 class WhileStatement(ASTNode):
     condition: ASTNode
     body: list[ASTNode] = field(default_factory=list)
+
+@dataclass
+class AssigmentExpression(ASTNode):
+    target: str
+    operator: str
+    value: ASTNode
