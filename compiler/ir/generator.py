@@ -6,10 +6,12 @@ from language.ast import (
     FunctionCall,
     FunctionDeclaration,
     Identifier,
+    IfStatement,
     Literal,
     Program,
     ReturnStatement,
     VariableDeclaration,
+    WhileStatement,
 )
 
 from .instructions import Instruction, OpCode
@@ -79,6 +81,12 @@ class IRGenerator:
         if isinstance(node, VariableDeclaration):
             self._variable(node)
 
+        elif isinstance(node, IfStatement):
+            self._if_statement(node)
+
+        elif isinstance(node, WhileStatement):
+            self._while_statement(node)
+
         elif isinstance(node, ReturnStatement):
             self._return(node)
 
@@ -143,6 +151,111 @@ class IRGenerator:
 
         raise TypeError(
             f"Unsupported AST node: {type(node).__name__}"
+        )
+
+    def _if_statement(self, node: IfStatement) -> None:
+        self._expression(node.condition)
+
+        jump_if_false = len(
+            self.current_function.instructions
+        )
+
+        self._emit(
+            Instruction(
+                OpCode.JUMP_IF_FALSE,
+                None,
+            )
+        )
+
+        for statement in node.then_body:
+            self._declaration(statement)
+
+        if node.else_body:
+            jump_end = len(
+                self.current_function.instructions
+            )
+
+            self._emit(
+                Instruction(
+                    OpCode.JUMP,
+                    None,
+                )
+            )
+
+            else_start = len(
+                self.current_function.instructions
+            )
+
+            self.current_function.instructions[
+                jump_if_false
+            ] = Instruction(
+                OpCode.JUMP_IF_FALSE,
+                else_start,
+            )
+
+            for statement in node.else_body:
+                self._declaration(statement)
+
+            end = len(
+                self.current_function.instructions
+            )
+
+            self.current_function.instructions[
+                jump_end
+            ] = Instruction(
+                OpCode.JUMP,
+                end,
+            )
+
+        else:
+            end = len(
+                self.current_function.instructions
+            )
+
+            self.current_function.instructions[
+                jump_if_false
+            ] = Instruction(
+                OpCode.JUMP_IF_FALSE,
+                end,
+            )
+
+    def _while_statement(self, node: WhileStatement) -> None:
+        loop_start = len(
+            self.current_function.instructions
+        )
+
+        self._expression(node.condition)
+
+        jump_exit = len(
+            self.current_function.instructions
+        )
+
+        self._emit(
+            Instruction(
+                OpCode.JUMP_IF_FALSE,
+                None,
+            )
+        )
+
+        for statement in node.body:
+            self._declaration(statement)
+
+        self._emit(
+            Instruction(
+                OpCode.JUMP,
+                loop_start,
+            )
+        )
+
+        loop_end = len(
+            self.current_function.instructions
+        )
+
+        self.current_function.instructions[
+            jump_exit
+        ] = Instruction(
+            OpCode.JUMP_IF_FALSE,
+            loop_end,
         )
 
     def _binary_opcode(self, operator: str) -> OpCode:
