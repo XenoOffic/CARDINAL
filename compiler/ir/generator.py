@@ -132,6 +132,10 @@ class IRGenerator:
             )
             return
 
+        if isinstance(node, AlignmentExpression):
+            self._assignment(node)
+            return
+
         if isinstance(node, BinaryExpression):
             self._expression(node.left)
             self._expression(node.right)
@@ -263,6 +267,32 @@ class IRGenerator:
             OpCode.JUMP_IF_FALSE,
             loop_end,
         )
+
+    def _assignment(self, expression: AssignmentExpression) -> None:
+    if expression.operator == "=":
+        self._expression(expression.value)
+        self._emit(OpCode.ASSIGN, expression.target)
+        return
+
+    self._emit(OpCode.LOAD, expression.target)
+    self._expression(expression.value)
+
+    operator_map = {
+        "+=": OpCode.ADD,
+        "-=": OpCode.SUB,
+        "*=": OpCode.MUL,
+        "/=": OpCode.DIV,
+    }
+
+    opcode = operator_map.get(expression.operator)
+
+    if opcode is None:
+        raise ValueError(
+            f"Unsupported assignment operator: {expression.operator}"
+        )
+
+    self._emit(opcode)
+    self._emit(OpCode.ASSIGN, expression.target)
 
     def _binary_opcode(self, operator: str) -> OpCode:
         operators = {
