@@ -12,6 +12,8 @@ from language.ast import (
     ReturnStatement,
     UnaryExpression,
     VariableDeclaration,
+    IfStatement,
+    WhileStatement,
 )
 from language.lexer import Lexer, Token, TokenType
 
@@ -272,20 +274,23 @@ class Parser:
         return statements
 
     def _if_statement(self):
-        condition = self._expression()
-        then_branch = self._block()
+        def _if_statement(self):
+    self._consume(TokenType.IF, "Expected 'if'.")
 
-        else_branch = []
+    condition = self._expression()
 
-        if self._match(TokenType.ELSE):
-            else_branch = self._block()
+    then_body = self._block()
 
-        return {
-            "type": "if",
-            "condition": condition,
-            "then": then_branch,
-            "else": else_branch,
-        }
+    else_body = []
+
+    if self._match(TokenType.ELSE):
+        else_body = self._block()
+
+    return IfStatement(
+        condition=condition,
+        then_body=then_body,
+        else_body=else_body,
+    )
 
     def _while_statement(self):
         condition = self._expression()
