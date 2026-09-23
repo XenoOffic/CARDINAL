@@ -154,13 +154,16 @@ class VM:
             frame,
         )
 
-        instance.state.update(
-            {
-                name: frame.locals[name]
-                for name in instance.state
-                if name in frame.locals
-            }
-        )
+        # The behavior frame may have modified agent
+        # state directly. Synchronize only the values
+        # that were actually present in the frame.
+        #
+        # Agent functions synchronize their changes
+        # directly into instance.state, and _call_agent
+        # mirrors those changes back into this frame.
+        for name in instance.state:
+            if name in frame.locals:
+                instance.state[name] = frame.locals[name]
 
         self.return_value = result
         self.frames.clear()
@@ -528,13 +531,15 @@ class VM:
             caller_frame,
         )
 
-        # Synchronize the caller's view of agent
-        # state after the agent function returns.
-        for name in self.current_agent.state:
+        # The agent function is authoritative for
+        # agent state. Mirror the updated state back
+        # into the caller frame so subsequent behavior
+        # instructions see the new values.
+        for name, value in (
+            self.current_agent.state.items()
+        ):
             if name in caller_frame.locals:
-                caller_frame.locals[name] = (
-                    self.current_agent.state[name]
-                )
+                caller_frame.locals[name] = value
 
         return result
 
@@ -577,6 +582,8 @@ class VM:
             )
         )
 
+        # Agent functions receive a snapshot of the
+        # current agent state as their initial locals.
         if self.current_agent is not None:
             for name, value in (
                 self.current_agent.state.items()
@@ -599,6 +606,8 @@ class VM:
             frame,
         )
 
+        # Persist modifications made by an agent
+        # function back into the actual agent instance.
         if self.current_agent is not None:
             for name in self.current_agent.state:
                 if name in frame.locals:
