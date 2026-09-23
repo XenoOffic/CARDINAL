@@ -20,6 +20,11 @@ def make_history() -> RuntimeHistory:
     )
 
     history.record(
+        "event.processed",
+        agent="Alpha",
+    )
+
+    history.record(
         "behavior.started",
         agent="Alpha",
         behavior="think",
@@ -51,7 +56,7 @@ def test_runtime_snapshot_counts_events() -> None:
 
     snapshot = intelligence.snapshot()
 
-    assert snapshot.total_events == 6
+    assert snapshot.total_events == 7
 
 
 def test_agent_statistics() -> None:
@@ -279,4 +284,4 @@ def test_negative_error_limit_is_rejected() -> None:
 
     raise AssertionError(
         "Expected ValueError"
-  )
+    )
