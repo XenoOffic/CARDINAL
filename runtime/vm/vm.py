@@ -17,6 +17,7 @@ from .messaging import (
     AgentMessage,
     MessageBus,
 )
+from .observability import RuntimeHistory
 from .scheduler import Scheduler
 
 
@@ -64,6 +65,13 @@ class AgentContext:
 
     messages_sent: int = 0
     messages_received: int = 0
+
+    current_behavior: str | None = None
+    current_event: AgentEvent | None = None
+    current_message: AgentMessage | None = None
+
+    execution_depth: int = 0
+    last_error: str | None = None
 
     def grant(
         self,
@@ -141,6 +149,13 @@ class AgentContext:
         self.instructions_executed = 0
         self.messages_sent = 0
         self.messages_received = 0
+
+        self.current_behavior = None
+        self.current_event = None
+        self.current_message = None
+
+        self.execution_depth = 0
+        self.last_error = None
 
 
 @dataclass
@@ -277,7 +292,35 @@ class VM:
         self.message_bus = MessageBus()
         self.scheduler = Scheduler()
 
+        self.observability = RuntimeHistory()
+
         self._instruction_budget: int | None = None
+        self._execution_instruction_count: int = 0
+
+    # ------------------------------------------------------------------
+    # Observability
+    # ------------------------------------------------------------------
+
+    def _record_runtime_event(
+        self,
+        event_type: str,
+        *,
+        agent: AgentInstance | None = None,
+        behavior: str | None = None,
+        source: str | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        self.observability.record(
+            event_type,
+            agent=(
+                agent.name
+                if agent is not None
+                else None
+            ),
+            behavior=behavior,
+            source=source,
+            metadata=metadata,
+        )
 
     # ------------------------------------------------------------------
     # Core execution
@@ -292,6 +335,7 @@ class VM:
         self.return_value = None
         self.current_agent = None
         self._instruction_budget = None
+        self._execution_instruction_count = 0
 
         frame = CallFrame(
             function_name=function.name
@@ -299,14 +343,28 @@ class VM:
 
         self.frames.append(frame)
 
-        result = self._execute_function(
-            function,
-            module,
-            frame,
-        )
+        try:
+            result = self._execute_function(
+                function,
+                module,
+                frame,
+            )
+        except Exception as exc:
+            self._record_runtime_event(
+                "runtime.error",
+                metadata={
+                    "error": str(exc),
+                    "function": function.name,
+                },
+            )
+            raise
+        finally:
+            self.frames.clear()
+            self.current_agent = None
+            self._instruction_budget = None
+            self._execution_instruction_count = 0
 
         self.return_value = result
-        self.frames.clear()
 
         return result
 
@@ -332,6 +390,16 @@ class VM:
 
         self.scheduler.register(
             instance.name
+        )
+
+        self._record_runtime_event(
+            "agent.spawned",
+            agent=instance,
+            metadata={
+                "lifecycle": (
+                    instance.lifecycle.name
+                ),
+            },
         )
 
         return instance
@@ -360,6 +428,16 @@ class VM:
     ) -> AgentInstance:
         instance.start()
 
+        self._record_runtime_event(
+            "agent.started",
+            agent=instance,
+            metadata={
+                "lifecycle": (
+                    instance.lifecycle.name
+                ),
+            },
+        )
+
         return instance
 
     def stop_agent(
@@ -370,6 +448,16 @@ class VM:
 
         self.scheduler.unregister(
             instance.name
+        )
+
+        self._record_runtime_event(
+            "agent.stopped",
+            agent=instance,
+            metadata={
+                "lifecycle": (
+                    instance.lifecycle.name
+                ),
+            },
         )
 
     def get_agent(
@@ -501,7 +589,7 @@ class VM:
             instance.context.lifecycle
             == AgentLifecycle.CREATED
         ):
-            instance.start()
+            self.start_agent(instance)
 
         behavior_name = (
             instance.context.resolve_behavior(
@@ -523,15 +611,37 @@ class VM:
                 f"on agent '{instance.name}'"
             )
 
-        result = self.execute_behavior(
-            instance,
-            behavior_name,
-            module,
+        previous_event = (
+            instance.context.current_event
         )
 
-        instance.context.events_processed += 1
+        instance.context.current_event = event
 
-        return result
+        try:
+            result = self.execute_behavior(
+                instance,
+                behavior_name,
+                module,
+            )
+
+            instance.context.events_processed += 1
+
+            self._record_runtime_event(
+                "event.processed",
+                agent=instance,
+                behavior=behavior_name,
+                source=event.source,
+                metadata={
+                    "event_type": event.type,
+                },
+            )
+
+            return result
+
+        finally:
+            instance.context.current_event = (
+                previous_event
+            )
 
     def process_next_event(
         self,
@@ -601,13 +711,6 @@ class VM:
         payload: object | None = None,
         metadata: dict[str, object] | None = None,
     ) -> AgentMessage:
-        """
-        Send a message from one agent to another.
-
-        Messaging requires the sender to have the
-        'messaging.send' capability.
-        """
-
         sender.context.require_capability(
             "messaging.send"
         )
@@ -646,18 +749,22 @@ class VM:
 
         sender.context.messages_sent += 1
 
+        self._record_runtime_event(
+            "message.sent",
+            agent=sender,
+            source=sender.name,
+            metadata={
+                "recipient": recipient_name,
+                "message_type": message_type,
+            },
+        )
+
         return message
 
     def receive_message(
         self,
         receiver: AgentInstance,
     ) -> AgentMessage | None:
-        """
-        Receive one message for an agent.
-
-        Receiving requires 'messaging.receive'.
-        """
-
         receiver.context.require_capability(
             "messaging.receive"
         )
@@ -668,6 +775,16 @@ class VM:
 
         if message is not None:
             receiver.context.messages_received += 1
+
+            self._record_runtime_event(
+                "message.received",
+                agent=receiver,
+                source=message.sender,
+                metadata={
+                    "message_type": message.type,
+                    "sender": message.sender,
+                },
+            )
 
         return message
 
@@ -686,6 +803,17 @@ class VM:
         receiver.context.messages_received += len(
             messages
         )
+
+        for message in messages:
+            self._record_runtime_event(
+                "message.received",
+                agent=receiver,
+                source=message.sender,
+                metadata={
+                    "message_type": message.type,
+                    "sender": message.sender,
+                },
+            )
 
         return messages
 
@@ -707,23 +835,30 @@ class VM:
         message: AgentMessage,
         module: IRModule | None = None,
     ) -> object | None:
-        """
-        Convert a message into an AgentEvent and dispatch it.
-
-        The message payload and sender are preserved.
-        """
-
         event = AgentEvent(
             type=message.type,
             payload=message.payload,
             source=message.sender,
         )
 
-        return self.dispatch_event(
-            receiver,
-            event,
-            module,
+        previous_message = (
+            receiver.context.current_message
         )
+
+        receiver.context.current_message = (
+            message
+        )
+
+        try:
+            return self.dispatch_event(
+                receiver,
+                event,
+                module,
+            )
+        finally:
+            receiver.context.current_message = (
+                previous_message
+            )
 
     def process_next_message(
         self,
@@ -751,12 +886,6 @@ class VM:
         self,
         module: IRModule | None = None,
     ) -> bool:
-        """
-        Execute one scheduler tick.
-
-        Returns True if work was processed.
-        """
-
         self.scheduler.tick()
 
         def has_work(
@@ -850,12 +979,6 @@ class VM:
         module: IRModule | None = None,
         max_ticks: int = 100,
     ) -> int:
-        """
-        Run the cooperative scheduler.
-
-        Returns the number of ticks executed.
-        """
-
         if max_ticks < 0:
             raise VMError(
                 "max_ticks cannot be negative."
@@ -904,7 +1027,16 @@ class VM:
             instance.context.lifecycle
             == AgentLifecycle.CREATED
         ):
-            instance.start()
+            self.start_agent(instance)
+
+        previous_agent = self.current_agent
+        previous_budget = self._instruction_budget
+        previous_count = (
+            self._execution_instruction_count
+        )
+        previous_behavior = (
+            instance.context.current_behavior
+        )
 
         self.frames.clear()
         self.return_value = None
@@ -912,6 +1044,20 @@ class VM:
 
         self._instruction_budget = (
             instance.context.max_instructions
+        )
+
+        self._execution_instruction_count = 0
+
+        instance.context.current_behavior = (
+            behavior_name
+        )
+
+        instance.context.execution_depth += 1
+
+        self._record_runtime_event(
+            "behavior.started",
+            agent=instance,
+            behavior=behavior_name,
         )
 
         frame = CallFrame(
@@ -926,25 +1072,72 @@ class VM:
 
         self.frames.append(frame)
 
-        result = self._execute_behavior(
-            behavior,
-            module,
-            frame,
-        )
+        try:
+            result = self._execute_behavior(
+                behavior,
+                module,
+                frame,
+            )
 
-        for name in instance.state:
-            if name in frame.locals:
-                instance.state[name] = (
-                    frame.locals[name]
-                )
+            for name in instance.state:
+                if name in frame.locals:
+                    instance.state[name] = (
+                        frame.locals[name]
+                    )
 
-        self.return_value = result
+            self.return_value = result
 
-        self.frames.clear()
-        self.current_agent = None
-        self._instruction_budget = None
+            self._record_runtime_event(
+                "behavior.completed",
+                agent=instance,
+                behavior=behavior_name,
+                metadata={
+                    "result_type": (
+                        type(result).__name__
+                        if result is not None
+                        else "None"
+                    ),
+                },
+            )
 
-        return result
+            return result
+
+        except Exception as exc:
+            instance.context.last_error = str(
+                exc
+            )
+
+            self._record_runtime_event(
+                "runtime.error",
+                agent=instance,
+                behavior=behavior_name,
+                metadata={
+                    "error": str(exc),
+                    "error_type": type(exc).__name__,
+                },
+            )
+
+            raise
+
+        finally:
+            self.frames.clear()
+
+            self.current_agent = previous_agent
+            self._instruction_budget = (
+                previous_budget
+            )
+            self._execution_instruction_count = (
+                previous_count
+            )
+
+            instance.context.current_behavior = (
+                previous_behavior
+            )
+
+            instance.context.execution_depth = max(
+                0,
+                instance.context.execution_depth - 1,
+            )
 
     # ------------------------------------------------------------------
     # Internal execution
@@ -1402,6 +1595,7 @@ class VM:
             return
 
         self.current_agent.context.instructions_executed += 1
+        self._execution_instruction_count += 1
 
         limit = self._instruction_budget
 
@@ -1409,7 +1603,7 @@ class VM:
             return
 
         if (
-            self.current_agent.context.instructions_executed
+            self._execution_instruction_count
             > limit
         ):
             raise VMError(
