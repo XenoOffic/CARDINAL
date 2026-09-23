@@ -747,7 +747,7 @@ class VM:
     # Scheduler
     # ------------------------------------------------------------------
 
-    def tick(
+        def tick(
         self,
         module: IRModule | None = None,
     ) -> bool:
@@ -759,8 +759,42 @@ class VM:
 
         self.scheduler.tick()
 
+        def has_work(
+            agent_name: str,
+        ) -> bool:
+            agent = self.get_agent(
+                agent_name
+            )
+
+            if agent is None:
+                return False
+
+            if (
+                agent.lifecycle
+                != AgentLifecycle.RUNNING
+            ):
+                return False
+
+            if agent.event_queue:
+                return True
+
+            if (
+                self.message_bus.pending(
+                    agent.name
+                )
+                > 0
+                and agent.context.has_capability(
+                    "messaging.receive"
+                )
+            ):
+                return True
+
+            return False
+
         agent_name = (
-            self.scheduler.next_agent()
+            self.scheduler.next_agent(
+                has_work
+            )
         )
 
         if agent_name is None:
