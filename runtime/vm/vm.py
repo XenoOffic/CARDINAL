@@ -155,7 +155,11 @@ class VM:
         )
 
         instance.state.update(
-            frame.locals
+            {
+                name: frame.locals[name]
+                for name in instance.state
+                if name in frame.locals
+            }
         )
 
         self.return_value = result
@@ -523,6 +527,14 @@ class VM:
             module,
             caller_frame,
         )
+
+        # Synchronize the caller's view of agent
+        # state after the agent function returns.
+        for name in self.current_agent.state:
+            if name in caller_frame.locals:
+                caller_frame.locals[name] = (
+                    self.current_agent.state[name]
+                )
 
         return result
 
