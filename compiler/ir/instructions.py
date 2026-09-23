@@ -8,6 +8,7 @@ class OpCode(Enum):
     CONSTANT = auto()
     LOAD = auto()
     STORE = auto()
+    ASSIGN = auto()
 
     ADD = auto()
     SUB = auto()
@@ -25,6 +26,9 @@ class OpCode(Enum):
     GREATER = auto()
     GREATER_EQUAL = auto()
 
+    AND = auto()
+    OR = auto()
+
     CALL = auto()
     RETURN = auto()
 
@@ -32,8 +36,6 @@ class OpCode(Enum):
     JUMP_IF_FALSE = auto()
 
     HALT = auto()
-
-    ASSIGN = auto()
 
 
 @dataclass(frozen=True)
