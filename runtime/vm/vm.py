@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from compiler.ir import IRFunction, IRModule, OpCode
+from dataclasses import dataclass, field
+
+from compiler.ir import (
+    IRAgent,
+    IRBehavior,
+    IRFunction,
+    IRModule,
+    OpCode,
+)
 
 from .frame import CallFrame
 
@@ -9,12 +17,50 @@ class VMError(Exception):
     """Raised when the CARDINAL VM encounters an execution error."""
 
 
+@dataclass
+class AgentInstance:
+    """Runtime instance of a CARDINAL agent."""
+
+    agent: IRAgent
+
+    state: dict[str, object] = field(
+        default_factory=dict
+    )
+
+    def __post_init__(self) -> None:
+        if not self.state:
+            self.state = dict(
+                self.agent.initial_state
+            )
+
+        for name in self.agent.state:
+            self.state.setdefault(
+                name,
+                None,
+            )
+
+    @property
+    def name(self) -> str:
+        return self.agent.name
+
+    def get_behavior(
+        self,
+        name: str,
+    ) -> IRBehavior | None:
+        return self.agent.get_behavior(name)
+
+
 class VM:
     """Stack-based virtual machine for CARDINAL IR."""
 
     def __init__(self) -> None:
         self.frames: list[CallFrame] = []
         self.return_value: object | None = None
+        self.agents: list[AgentInstance] = []
+
+    # ---------------------------------------------------------
+    # Normal functions
+    # ---------------------------------------------------------
 
     def execute(
         self,
@@ -41,15 +87,127 @@ class VM:
 
         return result
 
+    # ---------------------------------------------------------
+    # Agents
+    # ---------------------------------------------------------
+
+    def spawn_agent(
+        self,
+        agent: IRAgent,
+    ) -> AgentInstance:
+        instance = AgentInstance(agent)
+
+        self.agents.append(instance)
+
+        return instance
+
+    def spawn_agent_by_name(
+        self,
+        module: IRModule,
+        name: str,
+    ) -> AgentInstance:
+        agent = module.get_agent(name)
+
+        if agent is None:
+            raise VMError(
+                f"Unknown agent: {name}"
+            )
+
+        return self.spawn_agent(agent)
+
+    def execute_behavior(
+        self,
+        instance: AgentInstance,
+        behavior_name: str,
+        module: IRModule | None = None,
+    ) -> object | None:
+        behavior = instance.get_behavior(
+            behavior_name
+        )
+
+        if behavior is None:
+            raise VMError(
+                f"Unknown behavior "
+                f"'{behavior_name}' "
+                f"for agent '{instance.name}'"
+            )
+
+        self.frames.clear()
+        self.return_value = None
+
+        frame = CallFrame(
+            function_name=(
+                f"{instance.name}."
+                f"{behavior_name}"
+            ),
+            locals=dict(
+                instance.state
+            ),
+        )
+
+        self.frames.append(frame)
+
+        result = self._execute_behavior(
+            behavior,
+            module,
+            frame,
+        )
+
+        instance.state.update(
+            frame.locals
+        )
+
+        self.return_value = result
+        self.frames.clear()
+
+        return result
+
+    # ---------------------------------------------------------
+    # Function execution
+    # ---------------------------------------------------------
+
     def _execute_function(
         self,
         function: IRFunction,
         module: IRModule | None,
         frame: CallFrame,
     ) -> object | None:
-        instructions = function.instructions
+        return self._execute_instructions(
+            function.instructions,
+            module,
+            frame,
+        )
 
-        while frame.instruction_pointer < len(instructions):
+    # ---------------------------------------------------------
+    # Behavior execution
+    # ---------------------------------------------------------
+
+    def _execute_behavior(
+        self,
+        behavior: IRBehavior,
+        module: IRModule | None,
+        frame: CallFrame,
+    ) -> object | None:
+        return self._execute_instructions(
+            behavior.instructions,
+            module,
+            frame,
+        )
+
+    # ---------------------------------------------------------
+    # Instruction execution
+    # ---------------------------------------------------------
+
+    def _execute_instructions(
+        self,
+        instructions,
+        module: IRModule | None,
+        frame: CallFrame,
+    ) -> object | None:
+        while (
+            frame.instruction_pointer
+            < len(instructions)
+        ):
             instruction = instructions[
                 frame.instruction_pointer
             ]
@@ -58,7 +216,9 @@ class VM:
             stack = frame.operand_stack
 
             if opcode == OpCode.CONSTANT:
-                stack.append(instruction.operand)
+                stack.append(
+                    instruction.operand
+                )
 
             elif opcode == OpCode.LOAD:
                 name = instruction.operand
@@ -110,12 +270,10 @@ class VM:
 
                 value = stack.pop()
 
-                try:
-                    frame.assign(name, value)
-                except KeyError as exc:
-                    raise VMError(
-                        f"Undefined variable: {name}"
-                    ) from exc
+                frame.assign(
+                    name,
+                    value,
+                )
 
             elif opcode == OpCode.ENTER_SCOPE:
                 frame.enter_scope()
@@ -249,7 +407,8 @@ class VM:
             elif opcode == OpCode.JUMP_IF_FALSE:
                 if not stack:
                     raise VMError(
-                        "Stack underflow during JUMP_IF_FALSE"
+                        "Stack underflow during "
+                        "JUMP_IF_FALSE"
                     )
 
                 condition = stack.pop()
@@ -282,12 +441,17 @@ class VM:
 
             else:
                 raise VMError(
-                    f"Unsupported opcode: {opcode.name}"
+                    f"Unsupported opcode: "
+                    f"{opcode.name}"
                 )
 
             frame.instruction_pointer += 1
 
         return frame.return_value
+
+    # ---------------------------------------------------------
+    # Function calls
+    # ---------------------------------------------------------
 
     def _call(
         self,
@@ -302,23 +466,22 @@ class VM:
 
         function_name = instruction.operand
 
-        if not isinstance(function_name, str):
+        if not isinstance(
+            function_name,
+            str,
+        ):
             raise VMError(
                 "CALL requires a function name"
             )
 
-        target = next(
-            (
-                function
-                for function in module.functions
-                if function.name == function_name
-            ),
-            None,
+        target = module.get_function(
+            function_name
         )
 
         if target is None:
             raise VMError(
-                f"Unknown function: {function_name}"
+                f"Unknown function: "
+                f"{function_name}"
             )
 
         argument_count = len(
@@ -337,9 +500,11 @@ class VM:
         if argument_count == 0:
             arguments = []
         else:
-            arguments = caller_frame.operand_stack[
-                -argument_count:
-            ]
+            arguments = (
+                caller_frame.operand_stack[
+                    -argument_count:
+                ]
+            )
 
             del caller_frame.operand_stack[
                 -argument_count:
@@ -363,6 +528,10 @@ class VM:
             frame,
         )
 
+    # ---------------------------------------------------------
+    # Binary operations
+    # ---------------------------------------------------------
+
     def _binary(
         self,
         frame: CallFrame,
@@ -372,14 +541,18 @@ class VM:
 
         if len(stack) < 2:
             raise VMError(
-                "Stack underflow during binary operation"
+                "Stack underflow during "
+                "binary operation"
             )
 
         right = stack.pop()
         left = stack.pop()
 
         try:
-            result = operation(left, right)
+            result = operation(
+                left,
+                right,
+            )
         except Exception as exc:
             raise VMError(
                 f"Binary operation failed: {exc}"
