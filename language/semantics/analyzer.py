@@ -12,6 +12,7 @@ from language.ast import (
     Literal,
     Program,
     ReturnStatement,
+    UnaryExpression,
     VariableDeclaration,
     WhileStatement,
 )
@@ -23,7 +24,9 @@ from language.types import (
     INT,
     STRING,
     UNKNOWN,
+    UNIT,
     CardinalType,
+    TypeKind,
     function_type,
 )
 
@@ -261,7 +264,18 @@ class SemanticAnalyzer:
             self._return(node)
 
         elif isinstance(node, IfStatement):
-            self._expression_type(node.condition)
+            condition_type = self._expression_type(
+                node.condition
+            )
+
+            if (
+                condition_type != BOOL
+                and condition_type != ANY
+                and condition_type != UNKNOWN
+            ):
+                self._error(
+                    "If condition must be Bool."
+                )
 
             for statement in node.then_body:
                 self._statement(statement)
@@ -270,7 +284,18 @@ class SemanticAnalyzer:
                 self._statement(statement)
 
         elif isinstance(node, WhileStatement):
-            self._expression_type(node.condition)
+            condition_type = self._expression_type(
+                node.condition
+            )
+
+            if (
+                condition_type != BOOL
+                and condition_type != ANY
+                and condition_type != UNKNOWN
+            ):
+                self._error(
+                    "While condition must be Bool."
+                )
 
             for statement in node.body:
                 self._statement(statement)
@@ -337,6 +362,30 @@ class SemanticAnalyzer:
             node.target
         ]
 
+        if node.operator != "=":
+            if node.operator in {
+                "+=",
+                "-=",
+                "*=",
+                "/=",
+            }:
+                if variable_type not in {
+                    INT,
+                    FLOAT,
+                    ANY,
+                    UNKNOWN,
+                }:
+                    self._error(
+                        f"Compound assignment '{node.operator}' "
+                        f"requires a numeric variable."
+                    )
+
+            else:
+                self._error(
+                    f"Unsupported assignment operator "
+                    f"'{node.operator}'."
+                )
+
         if not self._compatible(
             variable_type,
             value_type,
@@ -379,80 +428,11 @@ class SemanticAnalyzer:
         if isinstance(node, FunctionCall):
             return self._function_call_type(node)
 
+        if isinstance(node, UnaryExpression):
+            return self._unary_type(node)
+
         if isinstance(node, BinaryExpression):
-            left_type = self._expression_type(
-                node.left
-            )
-
-            right_type = self._expression_type(
-                node.right
-            )
-
-            if (
-                left_type == UNKNOWN
-                or right_type == UNKNOWN
-            ):
-                return UNKNOWN
-
-            if node.operator in {
-                "+",
-                "-",
-                "*",
-                "/",
-                "%",
-            }:
-                if (
-                    left_type == INT
-                    and right_type == INT
-                ):
-                    return INT
-
-                if (
-                    left_type in {INT, FLOAT}
-                    and right_type in {INT, FLOAT}
-                ):
-                    return FLOAT
-
-                if (
-                    node.operator == "+"
-                    and left_type == STRING
-                    and right_type == STRING
-                ):
-                    return STRING
-
-                self._error(
-                    f"Invalid operands for "
-                    f"'{node.operator}': "
-                    f"{left_type} and {right_type}."
-                )
-
-                return UNKNOWN
-
-            if node.operator in {
-                "==",
-                "!=",
-                "<",
-                "<=",
-                ">",
-                ">=",
-            }:
-                return BOOL
-
-            if node.operator in {
-                "&&",
-                "||",
-            }:
-                if (
-                    left_type != BOOL
-                    or right_type != BOOL
-                ):
-                    self._error(
-                        f"Logical operator '{node.operator}' "
-                        f"requires Bool operands."
-                    )
-                    return UNKNOWN
-
-                return BOOL
+            return self._binary_type(node)
 
         if isinstance(node, AssignmentExpression):
             self._assignment(node)
@@ -463,6 +443,129 @@ class SemanticAnalyzer:
             return self.variables[node.target]
 
         return ANY
+
+    def _unary_type(
+        self,
+        node: UnaryExpression,
+    ) -> CardinalType:
+        operand_type = self._expression_type(
+            node.operand
+        )
+
+        if operand_type in {ANY, UNKNOWN}:
+            return operand_type
+
+        if node.operator == "-":
+            if operand_type in {INT, FLOAT}:
+                return operand_type
+
+            self._error(
+                f"Unary '-' requires a numeric operand, "
+                f"got {operand_type}."
+            )
+            return UNKNOWN
+
+        if node.operator == "!":
+            if operand_type == BOOL:
+                return BOOL
+
+            self._error(
+                f"Unary '!' requires a Bool operand, "
+                f"got {operand_type}."
+            )
+            return UNKNOWN
+
+        self._error(
+            f"Unsupported unary operator "
+            f"'{node.operator}'."
+        )
+
+        return UNKNOWN
+
+    def _binary_type(
+        self,
+        node: BinaryExpression,
+    ) -> CardinalType:
+        left_type = self._expression_type(
+            node.left
+        )
+
+        right_type = self._expression_type(
+            node.right
+        )
+
+        if (
+            left_type == UNKNOWN
+            or right_type == UNKNOWN
+        ):
+            return UNKNOWN
+
+        if node.operator in {
+            "+",
+            "-",
+            "*",
+            "/",
+            "%",
+        }:
+            if (
+                left_type == INT
+                and right_type == INT
+            ):
+                return INT
+
+            if (
+                left_type in {INT, FLOAT}
+                and right_type in {INT, FLOAT}
+            ):
+                return FLOAT
+
+            if (
+                node.operator == "+"
+                and left_type == STRING
+                and right_type == STRING
+            ):
+                return STRING
+
+            self._error(
+                f"Invalid operands for "
+                f"'{node.operator}': "
+                f"{left_type} and {right_type}."
+            )
+
+            return UNKNOWN
+
+        if node.operator in {
+            "==",
+            "!=",
+            "<",
+            "<=",
+            ">",
+            ">=",
+        }:
+            return BOOL
+
+        if node.operator in {
+            "&&",
+            "||",
+        }:
+            if (
+                left_type != BOOL
+                or right_type != BOOL
+            ):
+                self._error(
+                    f"Logical operator '{node.operator}' "
+                    f"requires Bool operands."
+                )
+                return UNKNOWN
+
+            return BOOL
+
+        self._error(
+            f"Unsupported binary operator "
+            f"'{node.operator}'."
+        )
+
+        return UNKNOWN
 
     def _function_call_type(
         self,
@@ -540,22 +643,17 @@ class SemanticAnalyzer:
             "Float": FLOAT,
             "Bool": BOOL,
             "String": STRING,
-            "Unit": self._unit_type(),
+            "Unit": UNIT,
             "Any": ANY,
         }
 
         return types.get(
             name,
             CardinalType(
-                kind=UNKNOWN.kind,
+                kind=TypeKind.UNKNOWN,
                 name=name,
             ),
         )
-
-    def _unit_type(self) -> CardinalType:
-        from language.types import UNIT
-
-        return UNIT
 
     def _compatible(
         self,
