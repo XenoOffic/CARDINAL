@@ -27,15 +27,7 @@ from .module import (
 
 
 class IRGenerator:
-    """
-    Converts CARDINAL AST nodes into intermediate representation.
-
-    The generator produces:
-    - normal functions
-    - agents
-    - agent state
-    - agent behaviors
-    """
+    """Converts CARDINAL AST nodes into intermediate representation."""
 
     def __init__(self) -> None:
         self.module = IRModule()
@@ -45,7 +37,6 @@ class IRGenerator:
 
     def generate(self, program: Program) -> IRModule:
         self.module = IRModule()
-
         self.current_function = None
         self.current_behavior = None
         self.current_agent = None
@@ -63,19 +54,12 @@ class IRGenerator:
             else:
                 self._declaration(declaration)
 
-        main.emit(
-            Instruction(OpCode.HALT)
-        )
-
+        main.emit(Instruction(OpCode.HALT))
         self.module.add_function(main)
 
         self.current_function = None
 
         return self.module
-
-    # ---------------------------------------------------------
-    # Functions
-    # ---------------------------------------------------------
 
     def _function(
         self,
@@ -123,10 +107,6 @@ class IRGenerator:
 
         return function
 
-    # ---------------------------------------------------------
-    # Agents
-    # ---------------------------------------------------------
-
     def _agent(
         self,
         node: AgentDeclaration,
@@ -144,16 +124,36 @@ class IRGenerator:
         self.current_behavior = None
 
         for member in node.members:
-            if isinstance(member, VariableDeclaration):
-                agent.add_state(member.name)
+            if isinstance(
+                member,
+                VariableDeclaration,
+            ):
+                initial_value = None
 
-            elif isinstance(member, BehaviorDeclaration):
+                if isinstance(
+                    member.value,
+                    Literal,
+                ):
+                    initial_value = member.value.value
+
+                agent.add_state(
+                    member.name,
+                    initial_value,
+                )
+
+            elif isinstance(
+                member,
+                BehaviorDeclaration,
+            ):
                 self._behavior(
                     member,
                     agent,
                 )
 
-            elif isinstance(member, FunctionDeclaration):
+            elif isinstance(
+                member,
+                FunctionDeclaration,
+            ):
                 self._function(
                     member,
                     target_agent=agent,
@@ -164,10 +164,6 @@ class IRGenerator:
         self.current_agent = previous_agent
         self.current_function = previous_function
         self.current_behavior = previous_behavior
-
-    # ---------------------------------------------------------
-    # Behaviors
-    # ---------------------------------------------------------
 
     def _behavior(
         self,
@@ -206,10 +202,6 @@ class IRGenerator:
 
         return behavior
 
-    # ---------------------------------------------------------
-    # Declarations
-    # ---------------------------------------------------------
-
     def _declaration(self, node) -> None:
         if isinstance(node, VariableDeclaration):
             self._variable(node)
@@ -229,10 +221,6 @@ class IRGenerator:
         elif isinstance(node, list):
             self._block(node)
 
-    # ---------------------------------------------------------
-    # Blocks
-    # ---------------------------------------------------------
-
     def _block(self, statements: list) -> None:
         self._emit(
             Instruction(OpCode.ENTER_SCOPE)
@@ -244,10 +232,6 @@ class IRGenerator:
         self._emit(
             Instruction(OpCode.EXIT_SCOPE)
         )
-
-    # ---------------------------------------------------------
-    # Variables
-    # ---------------------------------------------------------
 
     def _variable(
         self,
@@ -263,10 +247,6 @@ class IRGenerator:
             )
         )
 
-    # ---------------------------------------------------------
-    # Return
-    # ---------------------------------------------------------
-
     def _return(
         self,
         node: ReturnStatement,
@@ -277,10 +257,6 @@ class IRGenerator:
         self._emit(
             Instruction(OpCode.RETURN)
         )
-
-    # ---------------------------------------------------------
-    # Expressions
-    # ---------------------------------------------------------
 
     def _expression(self, node) -> None:
         if isinstance(node, Literal):
@@ -330,10 +306,6 @@ class IRGenerator:
             f"{type(node).__name__}"
         )
 
-    # ---------------------------------------------------------
-    # Unary expressions
-    # ---------------------------------------------------------
-
     def _unary(
         self,
         node: UnaryExpression,
@@ -359,10 +331,6 @@ class IRGenerator:
             Instruction(opcode)
         )
 
-    # ---------------------------------------------------------
-    # Binary expressions
-    # ---------------------------------------------------------
-
     def _binary(
         self,
         node: BinaryExpression,
@@ -377,10 +345,6 @@ class IRGenerator:
                 )
             )
         )
-
-    # ---------------------------------------------------------
-    # If
-    # ---------------------------------------------------------
 
     def _if_statement(
         self,
@@ -452,10 +416,6 @@ class IRGenerator:
                 ),
             )
 
-    # ---------------------------------------------------------
-    # While
-    # ---------------------------------------------------------
-
     def _while_statement(
         self,
         node: WhileStatement,
@@ -497,10 +457,6 @@ class IRGenerator:
                 loop_end,
             ),
         )
-
-    # ---------------------------------------------------------
-    # Assignment
-    # ---------------------------------------------------------
 
     def _assignment(
         self,
@@ -558,10 +514,6 @@ class IRGenerator:
             )
         )
 
-    # ---------------------------------------------------------
-    # Opcode mapping
-    # ---------------------------------------------------------
-
     def _binary_opcode(
         self,
         operator: str,
@@ -572,14 +524,12 @@ class IRGenerator:
             "*": OpCode.MUL,
             "/": OpCode.DIV,
             "%": OpCode.MOD,
-
             "==": OpCode.EQUAL,
             "!=": OpCode.NOT_EQUAL,
             "<": OpCode.LESS,
             "<=": OpCode.LESS_EQUAL,
             ">": OpCode.GREATER,
             ">=": OpCode.GREATER_EQUAL,
-
             "&&": OpCode.AND,
             "||": OpCode.OR,
         }
@@ -591,10 +541,6 @@ class IRGenerator:
             )
 
         return operators[operator]
-
-    # ---------------------------------------------------------
-    # Current instruction stream
-    # ---------------------------------------------------------
 
     def _instructions(self) -> list[Instruction]:
         if self.current_behavior is not None:
@@ -620,6 +566,4 @@ class IRGenerator:
         index: int,
         instruction: Instruction,
     ) -> None:
-        instructions = self._instructions()
-
-        instructions[index] = instruction
+        self._instructions()[index] = instruction
