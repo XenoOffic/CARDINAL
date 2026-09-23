@@ -5,12 +5,16 @@ from dataclasses import dataclass, field
 
 @dataclass
 class CallFrame:
-    """Execution context for a CARDINAL function."""
+    """Execution context for a CARDINAL function or behavior."""
 
     function_name: str
     instruction_pointer: int = 0
-    locals: dict[str, object] = field(default_factory=dict)
-    operand_stack: list[object] = field(default_factory=list)
+    locals: dict[str, object] = field(
+        default_factory=dict
+    )
+    operand_stack: list[object] = field(
+        default_factory=list
+    )
     return_value: object | None = None
 
     scopes: list[dict[str, object]] = field(
@@ -19,7 +23,9 @@ class CallFrame:
 
     def __post_init__(self) -> None:
         if not self.scopes:
-            self.scopes.append(self.locals)
+            self.scopes.append(
+                self.locals
+            )
         else:
             self.locals = self.scopes[0]
 
@@ -41,8 +47,13 @@ class CallFrame:
     ) -> None:
         self.scopes[-1][name] = value
 
-    def lookup(self, name: str) -> object:
-        for scope in reversed(self.scopes):
+    def lookup(
+        self,
+        name: str,
+    ) -> object:
+        for scope in reversed(
+            self.scopes
+        ):
             if name in scope:
                 return scope[name]
 
@@ -53,11 +64,11 @@ class CallFrame:
         name: str,
         value: object,
     ) -> None:
-        for scope in reversed(self.scopes):
+        for scope in reversed(
+            self.scopes
+        ):
             if name in scope:
                 scope[name] = value
                 return
 
-        # Compatibility with the original CARDINAL IR:
-        # ASSIGN can create a variable when no binding exists.
         self.scopes[-1][name] = value
