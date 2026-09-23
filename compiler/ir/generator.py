@@ -67,7 +67,9 @@ class IRGenerator:
             function.instructions[-1].opcode
             != OpCode.RETURN
         ):
-            function.emit(Instruction(OpCode.RETURN))
+            function.emit(
+                Instruction(OpCode.RETURN)
+            )
 
         self.module.add_function(function)
 
@@ -97,7 +99,25 @@ class IRGenerator:
         elif isinstance(node, ReturnStatement):
             self._return(node)
 
-    def _variable(self, node: VariableDeclaration) -> None:
+        elif isinstance(node, list):
+            self._block(node)
+
+    def _block(self, statements: list) -> None:
+        self._emit(
+            Instruction(OpCode.ENTER_SCOPE)
+        )
+
+        for statement in statements:
+            self._declaration(statement)
+
+        self._emit(
+            Instruction(OpCode.EXIT_SCOPE)
+        )
+
+    def _variable(
+        self,
+        node: VariableDeclaration,
+    ) -> None:
         if node.value is not None:
             self._expression(node.value)
 
@@ -206,8 +226,7 @@ class IRGenerator:
             )
         )
 
-        for statement in node.then_body:
-            self._declaration(statement)
+        self._block(node.then_body)
 
         if node.else_body:
             jump_end = len(
@@ -232,8 +251,7 @@ class IRGenerator:
                 else_start,
             )
 
-            for statement in node.else_body:
-                self._declaration(statement)
+            self._block(node.else_body)
 
             end = len(
                 self.current_function.instructions
@@ -258,7 +276,10 @@ class IRGenerator:
                 end,
             )
 
-    def _while_statement(self, node: WhileStatement) -> None:
+    def _while_statement(
+        self,
+        node: WhileStatement,
+    ) -> None:
         loop_start = len(
             self.current_function.instructions
         )
@@ -276,8 +297,7 @@ class IRGenerator:
             )
         )
 
-        for statement in node.body:
-            self._declaration(statement)
+        self._block(node.body)
 
         self._emit(
             Instruction(
