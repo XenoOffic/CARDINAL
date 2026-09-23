@@ -747,7 +747,7 @@ class VM:
     # Scheduler
     # ------------------------------------------------------------------
 
-        def tick(
+    def tick(
         self,
         module: IRModule | None = None,
     ) -> bool:
