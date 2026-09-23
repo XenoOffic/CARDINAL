@@ -10,6 +10,9 @@ class OpCode(Enum):
     STORE = auto()
     ASSIGN = auto()
 
+    ENTER_SCOPE = auto()
+    EXIT_SCOPE = auto()
+
     ADD = auto()
     SUB = auto()
     MUL = auto()
