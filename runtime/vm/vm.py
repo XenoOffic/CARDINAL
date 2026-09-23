@@ -1290,7 +1290,7 @@ class VM:
 
         return result
 
-    def _invoke_function(
+        def _invoke_function(
         self,
         target: IRFunction,
         module: IRModule | None,
@@ -1314,8 +1314,9 @@ class VM:
         else:
             arguments = (
                 caller_frame.operand_stack[
-                -argument_count:
-            ]
+                    -argument_count:
+                ]
+            )
 
         function_locals = dict(
             zip(
@@ -1349,9 +1350,12 @@ class VM:
         if self.current_agent is not None:
             for name in self.current_agent.state:
                 if name in frame.locals:
-                    self.current_agent.state[name] = (
-                        frame.locals[name]
-                    )
+                    self.current_agent.state[
+                        name
+                    ] = frame.locals[name]
+
+        if self.frames and self.frames[-1] is frame:
+            self.frames.pop()
 
         return result
 
