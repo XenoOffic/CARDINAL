@@ -7,11 +7,7 @@ from .instructions import Instruction
 
 @dataclass
 class IRFunction:
-    """
-    Compiled CARDINAL function.
-
-    A function owns its own instruction stream and parameters.
-    """
+    """Compiled CARDINAL function."""
 
     name: str
     parameters: list[str] = field(default_factory=list)
@@ -25,18 +21,7 @@ class IRFunction:
 
 @dataclass
 class IRBehavior:
-    """
-    Compiled behavior belonging to an agent.
-
-    A behavior is intentionally separate from a normal function.
-    This distinction becomes important when CARDINAL gains:
-    - scheduling
-    - autonomous execution
-    - event triggers
-    - priorities
-    - goals
-    - cognition
-    """
+    """Compiled behavior belonging to an agent."""
 
     name: str
     instructions: list[Instruction] = field(
@@ -49,22 +34,17 @@ class IRBehavior:
 
 @dataclass
 class IRAgent:
-    """
-    Compiled representation of a CARDINAL agent.
-
-    The agent contains:
-    - its identity
-    - optional parent agent
-    - persistent state declarations
-    - executable behaviors
-    - functions belonging to the agent
-    """
+    """Compiled representation of a CARDINAL agent."""
 
     name: str
     parent: str | None = None
 
     state: list[str] = field(
         default_factory=list
+    )
+
+    initial_state: dict[str, object] = field(
+        default_factory=dict
     )
 
     behaviors: list[IRBehavior] = field(
@@ -75,9 +55,15 @@ class IRAgent:
         default_factory=list
     )
 
-    def add_state(self, name: str) -> None:
+    def add_state(
+        self,
+        name: str,
+        initial_value: object = None,
+    ) -> None:
         if name not in self.state:
             self.state.append(name)
+
+        self.initial_state[name] = initial_value
 
     def add_behavior(
         self,
@@ -114,13 +100,7 @@ class IRAgent:
 
 @dataclass
 class IRModule:
-    """
-    Complete compiled representation of a CARDINAL program.
-
-    The module can contain:
-    - normal functions
-    - autonomous agents
-    """
+    """Complete compiled representation of a CARDINAL program."""
 
     name: str = "main"
 
