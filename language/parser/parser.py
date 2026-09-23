@@ -47,32 +47,32 @@ class Parser:
     # ---------------------------------------------------------
 
     def _declaration(self):
-        if self._match(TokenType.AGENT):
-            return self._agent_declaration()
+    if self._match(TokenType.AGENT):
+        return self._agent_declaration()
 
-        if self._match(TokenType.FN):
-            return self._function_declaration()
+    if self._match(TokenType.FN):
+        return self._function_declaration()
 
-        if self._match(TokenType.LET):
-            return self._variable_declaration(False)
+    if self._match(TokenType.LET):
+        return self._variable_declaration(False)
 
-        if self._match(TokenType.CONST):
-            self._consume(
-                TokenType.LET,
-                "Expected 'let' after 'const'.",
-            )
-
-        if self._match(TokenType.WHILE):
-            return self._while_statement()
-
-        if self._match(TokenType, IF):
-            return self._if_statement()
-            return self._variable_declaration(True)
-
-        raise self._error(
-            self._peek(),
-            "Expected declaration.",
+    if self._match(TokenType.CONST):
+        self._consume(
+            TokenType.LET,
+            "Expected 'let' after 'const'.",
         )
+        return self._variable_declaration(True)
+
+    if self._match(TokenType.WHILE):
+        return self._while_statement()
+
+    if self._match(TokenType.IF):
+        return self._if_statement()
+
+    raise self._error(
+        self._peek(),
+        "Expected declaration.",
+    )
 
     def _agent_declaration(self) -> AgentDeclaration:
         name = self._consume(
@@ -188,19 +188,22 @@ class Parser:
         )
 
     def _parameter(self) -> Identifier:
-        name = self._consume(
-            TokenType.IDENTIFIER,
-            "Expected parameter name.",
-        )
+    name = self._consume(
+        TokenType.IDENTIFIER,
+        "Expected parameter name.",
+    )
 
-        self._consume(
-            TokenType.COLON,
-            "Expected ':' after parameter name.",
-        )
+    self._consume(
+        TokenType.COLON,
+        "Expected ':' after parameter name.",
+    )
 
-        self._type_name()
+    type_name = self._type_name()
 
-        return Identifier(name.lexeme)
+    return Identifier(
+        name=name.lexeme,
+        type_name=type_name,
+    )
 
     def _variable_declaration(
         self,
