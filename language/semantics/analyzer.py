@@ -72,9 +72,7 @@ class SemanticAnalyzer:
                 declaration,
                 FunctionDeclaration,
             ):
-                self._register_function(
-                    declaration
-                )
+                self._register_function(declaration)
 
             elif isinstance(
                 declaration,
@@ -85,9 +83,7 @@ class SemanticAnalyzer:
                         member,
                         FunctionDeclaration,
                     ):
-                        self._register_function(
-                            member
-                        )
+                        self._register_function(member)
 
     def _register_function(
         self,
@@ -131,10 +127,7 @@ class SemanticAnalyzer:
     # ---------------------------------------------------------
 
     def _push_scope(self) -> None:
-        self.scope_stack.append(
-            self.variables
-        )
-
+        self.scope_stack.append(self.variables)
         self.variables = {}
 
     def _pop_scope(self) -> None:
@@ -165,9 +158,7 @@ class SemanticAnalyzer:
         if name in self.variables:
             return self.variables[name]
 
-        for scope in reversed(
-            self.scope_stack
-        ):
+        for scope in reversed(self.scope_stack):
             if name in scope:
                 return scope[name]
 
@@ -301,9 +292,7 @@ class SemanticAnalyzer:
         self,
         node: BehaviorDeclaration,
     ) -> None:
-        previous_behavior = (
-            self.inside_behavior
-        )
+        previous_behavior = self.inside_behavior
 
         self.inside_behavior = True
 
@@ -323,12 +312,8 @@ class SemanticAnalyzer:
         previous_variables = self.variables
         previous_scopes = self.scope_stack
         previous_function = self.current_function
-        previous_return_type = (
-            self.current_return_type
-        )
-        previous_has_return = (
-            self.current_function_has_return
-        )
+        previous_return_type = self.current_return_type
+        previous_has_return = self.current_function_has_return
         previous_behavior = self.inside_behavior
 
         function_agent_state = dict(
@@ -347,25 +332,20 @@ class SemanticAnalyzer:
         self.inside_behavior = False
         self.current_function_has_return = False
 
-        function_signature = (
-            self.function_types.get(
-                node.name
-            )
+        function_signature = self.function_types.get(
+            node.name
         )
 
         if function_signature is None:
             self._register_function(node)
 
-            function_signature = (
-                self.function_types[
-                    node.name
-                ]
-            )
+            function_signature = self.function_types[
+                node.name
+            ]
 
         self.current_return_type = (
             function_signature.return_type
-            if function_signature.return_type
-            is not None
+            if function_signature.return_type is not None
             else ANY
         )
 
@@ -373,9 +353,7 @@ class SemanticAnalyzer:
             node.parameters
         ):
             parameter_type = (
-                function_signature.parameters[
-                    index
-                ]
+                function_signature.parameters[index]
             )
 
             self._declare_variable(
@@ -388,8 +366,12 @@ class SemanticAnalyzer:
 
         if (
             node.return_type is not None
-            and self.current_return_type != ANY
-            and self.current_return_type != UNKNOWN
+            and self.current_return_type
+            not in {
+                ANY,
+                UNKNOWN,
+                UNIT,
+            }
             and not self.current_function_has_return
         ):
             self._error(
@@ -400,12 +382,8 @@ class SemanticAnalyzer:
         self.variables = previous_variables
         self.scope_stack = previous_scopes
         self.current_function = previous_function
-        self.current_return_type = (
-            previous_return_type
-        )
-        self.current_function_has_return = (
-            previous_has_return
-        )
+        self.current_return_type = previous_return_type
+        self.current_function_has_return = previous_has_return
         self.inside_behavior = previous_behavior
 
     # ---------------------------------------------------------
@@ -419,17 +397,13 @@ class SemanticAnalyzer:
         value_type = UNKNOWN
 
         if node.value is not None:
-            value_type = (
-                self._expression_type(
-                    node.value
-                )
+            value_type = self._expression_type(
+                node.value
             )
 
         if node.type_name is not None:
-            declared_type = (
-                self._resolve_type(
-                    node.type_name
-                )
+            declared_type = self._resolve_type(
+                node.type_name
             )
 
             if not self._compatible(
@@ -473,10 +447,8 @@ class SemanticAnalyzer:
             node,
             IfStatement,
         ):
-            condition_type = (
-                self._expression_type(
-                    node.condition
-                )
+            condition_type = self._expression_type(
+                node.condition
             )
 
             if (
@@ -488,23 +460,17 @@ class SemanticAnalyzer:
                     "If condition must be Bool."
                 )
 
-            self._block(
-                node.then_body
-            )
+            self._block(node.then_body)
 
             if node.else_body:
-                self._block(
-                    node.else_body
-                )
+                self._block(node.else_body)
 
         elif isinstance(
             node,
             WhileStatement,
         ):
-            condition_type = (
-                self._expression_type(
-                    node.condition
-                )
+            condition_type = self._expression_type(
+                node.condition
             )
 
             if (
@@ -551,24 +517,24 @@ class SemanticAnalyzer:
         self.current_function_has_return = True
 
         if node.value is None:
-            if (
-                self.current_return_type != ANY
-                and self.current_return_type
-                != UNKNOWN
-            ):
-                self._error(
-                    f"Function "
-                    f"'{self.current_function.name}' "
-                    f"must return "
-                    f"{self.current_return_type}."
-                )
+            if self.current_return_type in {
+                ANY,
+                UNKNOWN,
+                UNIT,
+            }:
+                return
+
+            self._error(
+                f"Function "
+                f"'{self.current_function.name}' "
+                f"must return "
+                f"{self.current_return_type}."
+            )
 
             return
 
-        value_type = (
-            self._expression_type(
-                node.value
-            )
+        value_type = self._expression_type(
+            node.value
         )
 
         if not self._compatible(
@@ -591,10 +557,8 @@ class SemanticAnalyzer:
         self,
         node: AssignmentExpression,
     ) -> None:
-        variable_type = (
-            self._lookup_variable(
-                node.target
-            )
+        variable_type = self._lookup_variable(
+            node.target
         )
 
         if variable_type is None:
@@ -604,10 +568,8 @@ class SemanticAnalyzer:
             )
             return
 
-        value_type = (
-            self._expression_type(
-                node.value
-            )
+        value_type = self._expression_type(
+            node.value
         )
 
         if node.operator != "=":
@@ -654,41 +616,24 @@ class SemanticAnalyzer:
         node,
     ) -> CardinalType:
         if isinstance(node, Literal):
-            if isinstance(
-                node.value,
-                bool,
-            ):
+            if isinstance(node.value, bool):
                 return BOOL
 
-            if isinstance(
-                node.value,
-                int,
-            ):
+            if isinstance(node.value, int):
                 return INT
 
-            if isinstance(
-                node.value,
-                float,
-            ):
+            if isinstance(node.value, float):
                 return FLOAT
 
-            if isinstance(
-                node.value,
-                str,
-            ):
+            if isinstance(node.value, str):
                 return STRING
 
             if node.value is None:
                 return UNKNOWN
 
-        if isinstance(
-            node,
-            Identifier,
-        ):
-            variable_type = (
-                self._lookup_variable(
-                    node.name
-                )
+        if isinstance(node, Identifier):
+            variable_type = self._lookup_variable(
+                node.name
             )
 
             if variable_type is None:
@@ -700,36 +645,20 @@ class SemanticAnalyzer:
 
             return variable_type
 
-        if isinstance(
-            node,
-            FunctionCall,
-        ):
-            return self._function_call_type(
-                node
-            )
+        if isinstance(node, FunctionCall):
+            return self._function_call_type(node)
 
-        if isinstance(
-            node,
-            UnaryExpression,
-        ):
+        if isinstance(node, UnaryExpression):
             return self._unary_type(node)
 
-        if isinstance(
-            node,
-            BinaryExpression,
-        ):
+        if isinstance(node, BinaryExpression):
             return self._binary_type(node)
 
-        if isinstance(
-            node,
-            AssignmentExpression,
-        ):
+        if isinstance(node, AssignmentExpression):
             self._assignment(node)
 
-            variable_type = (
-                self._lookup_variable(
-                    node.target
-                )
+            variable_type = self._lookup_variable(
+                node.target
             )
 
             return (
@@ -748,10 +677,8 @@ class SemanticAnalyzer:
         self,
         node: UnaryExpression,
     ) -> CardinalType:
-        operand_type = (
-            self._expression_type(
-                node.operand
-            )
+        operand_type = self._expression_type(
+            node.operand
         )
 
         if operand_type in {
@@ -804,16 +731,12 @@ class SemanticAnalyzer:
         self,
         node: BinaryExpression,
     ) -> CardinalType:
-        left_type = (
-            self._expression_type(
-                node.left
-            )
+        left_type = self._expression_type(
+            node.left
         )
 
-        right_type = (
-            self._expression_type(
-                node.right
-            )
+        right_type = self._expression_type(
+            node.right
         )
 
         if (
@@ -912,9 +835,7 @@ class SemanticAnalyzer:
             )
 
             for argument in node.arguments:
-                self._expression_type(
-                    argument
-                )
+                self._expression_type(argument)
 
             return UNKNOWN
 
@@ -943,10 +864,8 @@ class SemanticAnalyzer:
         )
 
         for index in range(count):
-            argument_type = (
-                self._expression_type(
-                    node.arguments[index]
-                )
+            argument_type = self._expression_type(
+                node.arguments[index]
             )
 
             parameter_type = (
@@ -964,9 +883,7 @@ class SemanticAnalyzer:
                     f"but got {argument_type}."
                 )
 
-        for argument in (
-            node.arguments[count:]
-        ):
+        for argument in node.arguments[count:]:
             self._expression_type(argument)
 
         return (
