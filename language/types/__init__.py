@@ -8,6 +8,7 @@ from .type import (
     UNKNOWN,
     CardinalType,
     TypeKind,
+    function_type,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "UNKNOWN",
     "CardinalType",
     "TypeKind",
+    "function_type",
 ]
