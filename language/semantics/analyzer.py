@@ -38,6 +38,8 @@ class SemanticError(Exception):
 class SemanticAnalyzer:
     def __init__(self) -> None:
         self.variables: dict[str, CardinalType] = {}
+        self.scope_stack: list[dict[str, CardinalType]] = []
+
         self.functions: dict[str, FunctionDeclaration] = {}
         self.function_types: dict[str, CardinalType] = {}
         self.agents: set[str] = set()
@@ -91,17 +93,54 @@ class SemanticAnalyzer:
                     )
                 )
 
-        if node.return_type is None:
-            return_type = ANY
-        else:
-            return_type = self._resolve_type(
-                node.return_type
-            )
+        return_type = (
+            ANY
+            if node.return_type is None
+            else self._resolve_type(node.return_type)
+        )
 
         self.function_types[node.name] = function_type(
             parameter_types,
             return_type,
         )
+
+    def _push_scope(self) -> None:
+        self.scope_stack.append(self.variables)
+        self.variables = {}
+
+    def _pop_scope(self) -> None:
+        if not self.scope_stack:
+            raise RuntimeError(
+                "Semantic scope stack underflow."
+            )
+
+        self.variables = self.scope_stack.pop()
+
+    def _declare_variable(
+        self,
+        name: str,
+        value_type: CardinalType,
+    ) -> None:
+        if name in self.variables:
+            self._error(
+                f"Variable '{name}' is already declared."
+            )
+            return
+
+        self.variables[name] = value_type
+
+    def _lookup_variable(
+        self,
+        name: str,
+    ) -> CardinalType | None:
+        if name in self.variables:
+            return self.variables[name]
+
+        for scope in reversed(self.scope_stack):
+            if name in scope:
+                return scope[name]
+
+        return None
 
     def _declaration(self, node) -> None:
         if isinstance(node, AgentDeclaration):
@@ -122,6 +161,17 @@ class SemanticAnalyzer:
         elif isinstance(node, AssignmentExpression):
             self._statement(node)
 
+        elif isinstance(node, list):
+            self._block(node)
+
+    def _block(self, statements: list) -> None:
+        self._push_scope()
+
+        for statement in statements:
+            self._statement(statement)
+
+        self._pop_scope()
+
     def _agent(self, node: AgentDeclaration) -> None:
         if node.name in self.agents:
             self._error(
@@ -132,9 +182,12 @@ class SemanticAnalyzer:
         self.agents.add(node.name)
 
         previous_variables = self.variables
+        previous_scopes = self.scope_stack
         previous_behavior = self.inside_behavior
 
         self.variables = {}
+        self.scope_stack = []
+        self.inside_behavior = False
 
         for member in node.members:
             if isinstance(member, BehaviorDeclaration):
@@ -147,6 +200,7 @@ class SemanticAnalyzer:
                 self._function(member)
 
         self.variables = previous_variables
+        self.scope_stack = previous_scopes
         self.inside_behavior = previous_behavior
 
     def _behavior(self, node: BehaviorDeclaration) -> None:
@@ -161,12 +215,14 @@ class SemanticAnalyzer:
 
     def _function(self, node: FunctionDeclaration) -> None:
         previous_variables = self.variables
+        previous_scopes = self.scope_stack
         previous_function = self.current_function
         previous_return_type = self.current_return_type
         previous_has_return = self.current_function_has_return
         previous_behavior = self.inside_behavior
 
         self.variables = {}
+        self.scope_stack = []
         self.current_function = node
         self.inside_behavior = False
         self.current_function_has_return = False
@@ -194,14 +250,10 @@ class SemanticAnalyzer:
                 function_signature.parameters[index]
             )
 
-            if parameter.name in self.variables:
-                self._error(
-                    f"Parameter '{parameter.name}' is already "
-                    f"declared in function '{node.name}'."
-                )
-                continue
-
-            self.variables[parameter.name] = parameter_type
+            self._declare_variable(
+                parameter.name,
+                parameter_type,
+            )
 
         for statement in node.body:
             self._statement(statement)
@@ -218,18 +270,13 @@ class SemanticAnalyzer:
             )
 
         self.variables = previous_variables
+        self.scope_stack = previous_scopes
         self.current_function = previous_function
         self.current_return_type = previous_return_type
         self.current_function_has_return = previous_has_return
         self.inside_behavior = previous_behavior
 
     def _variable(self, node: VariableDeclaration) -> None:
-        if node.name in self.variables:
-            self._error(
-                f"Variable '{node.name}' is already declared."
-            )
-            return
-
         value_type = UNKNOWN
 
         if node.value is not None:
@@ -254,7 +301,10 @@ class SemanticAnalyzer:
 
             value_type = declared_type
 
-        self.variables[node.name] = value_type
+        self._declare_variable(
+            node.name,
+            value_type,
+        )
 
     def _statement(self, node) -> None:
         if isinstance(node, VariableDeclaration):
@@ -277,11 +327,10 @@ class SemanticAnalyzer:
                     "If condition must be Bool."
                 )
 
-            for statement in node.then_body:
-                self._statement(statement)
+            self._block(node.then_body)
 
-            for statement in node.else_body:
-                self._statement(statement)
+            if node.else_body:
+                self._block(node.else_body)
 
         elif isinstance(node, WhileStatement):
             condition_type = self._expression_type(
@@ -297,11 +346,13 @@ class SemanticAnalyzer:
                     "While condition must be Bool."
                 )
 
-            for statement in node.body:
-                self._statement(statement)
+            self._block(node.body)
 
         elif isinstance(node, AssignmentExpression):
             self._assignment(node)
+
+        elif isinstance(node, list):
+            self._block(node)
 
         else:
             self._expression_type(node)
@@ -348,7 +399,11 @@ class SemanticAnalyzer:
         self,
         node: AssignmentExpression,
     ) -> None:
-        if node.target not in self.variables:
+        variable_type = self._lookup_variable(
+            node.target
+        )
+
+        if variable_type is None:
             self._error(
                 f"Unknown identifier '{node.target}'."
             )
@@ -357,10 +412,6 @@ class SemanticAnalyzer:
         value_type = self._expression_type(
             node.value
         )
-
-        variable_type = self.variables[
-            node.target
-        ]
 
         if node.operator != "=":
             if node.operator in {
@@ -376,10 +427,10 @@ class SemanticAnalyzer:
                     UNKNOWN,
                 }:
                     self._error(
-                        f"Compound assignment '{node.operator}' "
-                        f"requires a numeric variable."
+                        f"Compound assignment "
+                        f"'{node.operator}' requires "
+                        f"a numeric variable."
                     )
-
             else:
                 self._error(
                     f"Unsupported assignment operator "
@@ -417,13 +468,17 @@ class SemanticAnalyzer:
                 return UNKNOWN
 
         if isinstance(node, Identifier):
-            if node.name not in self.variables:
+            variable_type = self._lookup_variable(
+                node.name
+            )
+
+            if variable_type is None:
                 self._error(
                     f"Unknown identifier '{node.name}'."
                 )
                 return UNKNOWN
 
-            return self.variables[node.name]
+            return variable_type
 
         if isinstance(node, FunctionCall):
             return self._function_call_type(node)
@@ -437,10 +492,15 @@ class SemanticAnalyzer:
         if isinstance(node, AssignmentExpression):
             self._assignment(node)
 
-            if node.target not in self.variables:
-                return UNKNOWN
+            variable_type = self._lookup_variable(
+                node.target
+            )
 
-            return self.variables[node.target]
+            return (
+                variable_type
+                if variable_type is not None
+                else UNKNOWN
+            )
 
         return ANY
 
@@ -455,13 +515,13 @@ class SemanticAnalyzer:
         if operand_type in {ANY, UNKNOWN}:
             return operand_type
 
-        if node.operator == "-":
+        if node.operator in {"-", "+"}:
             if operand_type in {INT, FLOAT}:
                 return operand_type
 
             self._error(
-                f"Unary '-' requires a numeric operand, "
-                f"got {operand_type}."
+                f"Unary '{node.operator}' requires "
+                f"a numeric operand, got {operand_type}."
             )
             return UNKNOWN
 
