@@ -121,7 +121,7 @@ def test_agent_function_can_return_value():
         }
 
         behavior read {
-            getValue();
+            return getValue();
         }
     }
     """
