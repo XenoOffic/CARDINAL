@@ -49,6 +49,12 @@ class AgentInstance:
     ) -> IRBehavior | None:
         return self.agent.get_behavior(name)
 
+    def get_function(
+        self,
+        name: str,
+    ) -> IRFunction | None:
+        return self.agent.get_function(name)
+
 
 class VM:
     """Stack-based virtual machine for CARDINAL IR."""
@@ -57,10 +63,7 @@ class VM:
         self.frames: list[CallFrame] = []
         self.return_value: object | None = None
         self.agents: list[AgentInstance] = []
-
-    # ---------------------------------------------------------
-    # Normal functions
-    # ---------------------------------------------------------
+        self.current_agent: AgentInstance | None = None
 
     def execute(
         self,
@@ -69,6 +72,7 @@ class VM:
     ) -> object | None:
         self.frames.clear()
         self.return_value = None
+        self.current_agent = None
 
         frame = CallFrame(
             function_name=function.name
@@ -86,10 +90,6 @@ class VM:
         self.frames.clear()
 
         return result
-
-    # ---------------------------------------------------------
-    # Agents
-    # ---------------------------------------------------------
 
     def spawn_agent(
         self,
@@ -134,6 +134,7 @@ class VM:
 
         self.frames.clear()
         self.return_value = None
+        self.current_agent = instance
 
         frame = CallFrame(
             function_name=(
@@ -159,12 +160,9 @@ class VM:
 
         self.return_value = result
         self.frames.clear()
+        self.current_agent = None
 
         return result
-
-    # ---------------------------------------------------------
-    # Function execution
-    # ---------------------------------------------------------
 
     def _execute_function(
         self,
@@ -178,10 +176,6 @@ class VM:
             frame,
         )
 
-    # ---------------------------------------------------------
-    # Behavior execution
-    # ---------------------------------------------------------
-
     def _execute_behavior(
         self,
         behavior: IRBehavior,
@@ -193,10 +187,6 @@ class VM:
             module,
             frame,
         )
-
-    # ---------------------------------------------------------
-    # Instruction execution
-    # ---------------------------------------------------------
 
     def _execute_instructions(
         self,
@@ -398,6 +388,16 @@ class VM:
                 if result is not None:
                     stack.append(result)
 
+            elif opcode == OpCode.CALL_AGENT:
+                result = self._call_agent(
+                    instruction,
+                    module,
+                    frame,
+                )
+
+                if result is not None:
+                    stack.append(result)
+
             elif opcode == OpCode.JUMP:
                 frame.instruction_pointer = int(
                     instruction.operand
@@ -449,10 +449,6 @@ class VM:
 
         return frame.return_value
 
-    # ---------------------------------------------------------
-    # Function calls
-    # ---------------------------------------------------------
-
     def _call(
         self,
         instruction,
@@ -484,6 +480,58 @@ class VM:
                 f"{function_name}"
             )
 
+        return self._invoke_function(
+            target,
+            module,
+            caller_frame,
+        )
+
+    def _call_agent(
+        self,
+        instruction,
+        module: IRModule | None,
+        caller_frame: CallFrame,
+    ) -> object | None:
+        if self.current_agent is None:
+            raise VMError(
+                "CALL_AGENT requires an active agent."
+            )
+
+        function_name = instruction.operand
+
+        if not isinstance(
+            function_name,
+            str,
+        ):
+            raise VMError(
+                "CALL_AGENT requires a function name"
+            )
+
+        target = self.current_agent.get_function(
+            function_name
+        )
+
+        if target is None:
+            raise VMError(
+                f"Unknown agent function: "
+                f"{self.current_agent.name}."
+                f"{function_name}"
+            )
+
+        result = self._invoke_function(
+            target,
+            module,
+            caller_frame,
+        )
+
+        return result
+
+    def _invoke_function(
+        self,
+        target: IRFunction,
+        module: IRModule | None,
+        caller_frame: CallFrame,
+    ) -> object | None:
         argument_count = len(
             target.parameters
         )
@@ -494,7 +542,7 @@ class VM:
         ):
             raise VMError(
                 f"Not enough arguments for "
-                f"function '{function_name}'"
+                f"function '{target.name}'"
             )
 
         if argument_count == 0:
@@ -510,27 +558,43 @@ class VM:
                 -argument_count:
             ]
 
-        frame = CallFrame(
-            function_name=function_name,
-            locals=dict(
-                zip(
-                    target.parameters,
-                    arguments,
+        function_locals = dict(
+            zip(
+                target.parameters,
+                arguments,
+            )
+        )
+
+        if self.current_agent is not None:
+            for name, value in (
+                self.current_agent.state.items()
+            ):
+                function_locals.setdefault(
+                    name,
+                    value,
                 )
-            ),
+
+        frame = CallFrame(
+            function_name=target.name,
+            locals=function_locals,
         )
 
         self.frames.append(frame)
 
-        return self._execute_function(
+        result = self._execute_function(
             target,
             module,
             frame,
         )
 
-    # ---------------------------------------------------------
-    # Binary operations
-    # ---------------------------------------------------------
+        if self.current_agent is not None:
+            for name in self.current_agent.state:
+                if name in frame.locals:
+                    self.current_agent.state[name] = (
+                        frame.locals[name]
+                    )
+
+        return result
 
     def _binary(
         self,
