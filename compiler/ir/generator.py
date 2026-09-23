@@ -35,11 +35,14 @@ class IRGenerator:
         self.current_behavior: IRBehavior | None = None
         self.current_agent: IRAgent | None = None
 
+        self.agent_function_names: set[str] = set()
+
     def generate(self, program: Program) -> IRModule:
         self.module = IRModule()
         self.current_function = None
         self.current_behavior = None
         self.current_agent = None
+        self.agent_function_names = set()
 
         main = IRFunction(name="main")
         self.current_function = main
@@ -123,6 +126,15 @@ class IRGenerator:
         self.current_agent = agent
         self.current_behavior = None
 
+        self.agent_function_names = {
+            member.name
+            for member in node.members
+            if isinstance(
+                member,
+                FunctionDeclaration,
+            )
+        }
+
         for member in node.members:
             if isinstance(
                 member,
@@ -164,6 +176,7 @@ class IRGenerator:
         self.current_agent = previous_agent
         self.current_function = previous_function
         self.current_behavior = previous_behavior
+        self.agent_function_names = set()
 
     def _behavior(
         self,
@@ -293,12 +306,25 @@ class IRGenerator:
             for argument in node.arguments:
                 self._expression(argument)
 
-            self._emit(
-                Instruction(
-                    OpCode.CALL,
-                    node.name,
+            if (
+                self.current_agent is not None
+                and node.name
+                in self.agent_function_names
+            ):
+                self._emit(
+                    Instruction(
+                        OpCode.CALL_AGENT,
+                        node.name,
+                    )
                 )
-            )
+            else:
+                self._emit(
+                    Instruction(
+                        OpCode.CALL,
+                        node.name,
+                    )
+                )
+
             return
 
         raise TypeError(
