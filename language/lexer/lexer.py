@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .token import Token, TokenType
-
 from .errors import LexerError
+from .token import Token, TokenType
 
 
 KEYWORDS = {
@@ -29,6 +28,22 @@ KEYWORDS = {
     "true": TokenType.TRUE,
     "false": TokenType.FALSE,
     "null": TokenType.NULL,
+}
+
+
+COMPOUND_LEXEMES = {
+    TokenType.EQUAL: "==",
+    TokenType.NOT_EQUAL: "!=",
+    TokenType.LESS_EQUAL: "<=",
+    TokenType.GREATER_EQUAL: ">=",
+    TokenType.PLUS_ASSIGN: "+=",
+    TokenType.MINUS_ASSIGN: "-=",
+    TokenType.STAR_ASSIGN: "*=",
+    TokenType.SLASH_ASSIGN: "/=",
+    TokenType.ARROW: "->",
+    TokenType.AND: "&&",
+    TokenType.OR: "||",
+    TokenType.DOUBLE_COLON: "::",
 }
 
 
@@ -94,7 +109,6 @@ class Lexer:
             "{": TokenType.LBRACE,
             "}": TokenType.RBRACE,
             ",": TokenType.COMMA,
-            ":": TokenType.COLON,
             ";": TokenType.SEMICOLON,
         }
 
@@ -102,8 +116,18 @@ class Lexer:
             self._add_token(single_character_tokens[char])
             return
 
+        if char == ":":
+            if self._match(":"):
+                self._add_token(TokenType.DOUBLE_COLON)
+            else:
+                self._add_token(TokenType.COLON)
+            return
+
+        if char == "%":
+            self._add_token(TokenType.PERCENT)
+            return
+
         if char == ".":
-            # Decimal numbers are handled by _number().
             self._error("Unexpected '.'")
             return
 
@@ -193,7 +217,10 @@ class Lexer:
                 break
 
         lexeme = self.source[start:self.position]
-        token_type = KEYWORDS.get(lexeme, TokenType.IDENTIFIER)
+        token_type = KEYWORDS.get(
+            lexeme,
+            TokenType.IDENTIFIER,
+        )
 
         self._add_token(token_type, lexeme)
 
@@ -209,10 +236,15 @@ class Lexer:
             self._advance()
 
             if self._at_end() or not self._peek().isdigit():
-                self._error("Expected digit after decimal point")
+                self._error(
+                    "Expected digit after decimal point"
+                )
                 return
 
-            while not self._at_end() and self._peek().isdigit():
+            while (
+                not self._at_end()
+                and self._peek().isdigit()
+            ):
                 self._advance()
 
             token_type = TokenType.FLOAT_LITERAL
@@ -223,7 +255,10 @@ class Lexer:
     def _string(self) -> None:
         start = self.position
 
-        while not self._at_end() and self._peek() != '"':
+        while (
+            not self._at_end()
+            and self._peek() != '"'
+        ):
             if self._peek() == "\n":
                 self.line += 1
                 self.column = 1
@@ -240,12 +275,18 @@ class Lexer:
         self._add_token(TokenType.STRING, lexeme)
 
     def _skip_line_comment(self) -> None:
-        while not self._at_end() and self._peek() != "\n":
+        while (
+            not self._at_end()
+            and self._peek() != "\n"
+        ):
             self._advance()
 
     def _skip_block_comment(self) -> None:
         while not self._at_end():
-            if self._peek() == "*" and self._peek_next() == "/":
+            if (
+                self._peek() == "*"
+                and self._peek_next() == "/"
+            ):
                 self._advance()
                 self._advance()
                 return
@@ -296,7 +337,12 @@ class Lexer:
         lexeme: str | None = None,
     ) -> None:
         if lexeme is None:
-            lexeme = self.source[self.position - 1:self.position]
+            lexeme = COMPOUND_LEXEMES.get(
+                token_type,
+                self.source[
+                    self.position - 1:self.position
+                ],
+            )
 
         self.tokens.append(
             Token(
@@ -312,4 +358,4 @@ class Lexer:
             message,
             self.line,
             self.column,
-        )
+            )
