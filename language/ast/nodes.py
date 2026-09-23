@@ -44,13 +44,56 @@ class FunctionDeclaration(ASTNode):
 
 @dataclass
 class AgentDeclaration(ASTNode):
+    """
+    Declares an autonomous CARDINAL agent.
+
+    An agent owns:
+    - persistent state variables
+    - behaviors
+    - functions
+    """
+
     name: str
     parent: str | None
     members: list[ASTNode] = field(default_factory=list)
 
+    @property
+    def variables(self) -> list[VariableDeclaration]:
+        """Return all state variables declared by the agent."""
+
+        return [
+            member
+            for member in self.members
+            if isinstance(member, VariableDeclaration)
+        ]
+
+    @property
+    def behaviors(self) -> list[BehaviorDeclaration]:
+        """Return all behaviors declared by the agent."""
+
+        return [
+            member
+            for member in self.members
+            if isinstance(member, BehaviorDeclaration)
+        ]
+
+    @property
+    def functions(self) -> list[FunctionDeclaration]:
+        """Return all functions declared by the agent."""
+
+        return [
+            member
+            for member in self.members
+            if isinstance(member, FunctionDeclaration)
+        ]
+
 
 @dataclass
 class BehaviorDeclaration(ASTNode):
+    """
+    Declares an executable behavior owned by an agent.
+    """
+
     name: str
     body: list[ASTNode] = field(default_factory=list)
 
