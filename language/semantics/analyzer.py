@@ -11,6 +11,7 @@ from language.ast import (
     WhileStatement,
     IfStatement,
     AssignmentExpression,
+    BinaryExpression,
 )
 from language.types import (
     ANY,
@@ -93,6 +94,41 @@ class SemanticAnalyzer:
     def _statement(self, node) -> None:
     if isinstance(node, VariableDeclaration):
         self._variable(node)
+
+    elif isinstance(node, ReturnStatement):
+        if node.value is not None:
+            self._expression_type(node.value)
+
+    elif isinstance(node, IfStatement):
+        self._expression_type(node.condition)
+
+        for statement in node.then_body:
+            self._statement(statement)
+
+        for statement in node.else_body:
+            self._statement(statement)
+
+    elif isinstance(node, WhileStatement):
+        self._expression_type(node.condition)
+
+        for statement in node.body:
+            self._statement(statement)
+
+    elif isinstance(node, AssignmentExpression):
+        if node.target not in self.variables:
+            self._error(
+                f"Unknown identifier '{node.target}'."
+            )
+            return
+
+        value_type = self._expression_type(node.value)
+        variable_type = self.variables[node.target]
+
+        if not self._compatible(variable_type, value_type):
+            self._error(
+                f"Cannot assign {value_type} to "
+                f"variable '{node.target}' of type {variable_type}."
+            )
 
     elif isinstance(node, ReturnStatement):
         if node.value is not None:
