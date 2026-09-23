@@ -1,8 +1,9 @@
 from .frame import CallFrame
-from .vm import VM, VMError
+from .vm import AgentInstance, VM, VMError
 
 __all__ = [
     "CallFrame",
+    "AgentInstance",
     "VM",
     "VMError",
 ]
