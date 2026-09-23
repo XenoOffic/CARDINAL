@@ -18,6 +18,7 @@ class Program(ASTNode):
 @dataclass
 class Identifier(ASTNode):
     name: str
+    type_name: str | None = None
 
 
 @dataclass
@@ -89,6 +90,7 @@ class IfStatement(ASTNode):
 class WhileStatement(ASTNode):
     condition: ASTNode
     body: list[ASTNode] = field(default_factory=list)
+
 
 @dataclass
 class AssignmentExpression(ASTNode):
