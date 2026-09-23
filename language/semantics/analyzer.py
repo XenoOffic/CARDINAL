@@ -41,6 +41,7 @@ class SemanticAnalyzer:
         self.current_function: FunctionDeclaration | None = None
         self.current_return_type: CardinalType = ANY
         self.current_function_has_return = False
+        self.inside_behavior = False
 
     def analyze(self, program: Program) -> None:
         self._collect_functions(program)
@@ -102,12 +103,13 @@ class SemanticAnalyzer:
         self.agents.add(node.name)
 
         previous_variables = self.variables
+        previous_behavior = self.inside_behavior
+
         self.variables = {}
 
         for member in node.members:
             if isinstance(member, BehaviorDeclaration):
-                for statement in member.body:
-                    self._statement(statement)
+                self._behavior(member)
 
             elif isinstance(member, VariableDeclaration):
                 self._variable(member)
@@ -116,15 +118,27 @@ class SemanticAnalyzer:
                 self._function(member)
 
         self.variables = previous_variables
+        self.inside_behavior = previous_behavior
+
+    def _behavior(self, node: BehaviorDeclaration) -> None:
+        previous_behavior = self.inside_behavior
+        self.inside_behavior = True
+
+        for statement in node.body:
+            self._statement(statement)
+
+        self.inside_behavior = previous_behavior
 
     def _function(self, node: FunctionDeclaration) -> None:
         previous_variables = self.variables
         previous_function = self.current_function
         previous_return_type = self.current_return_type
         previous_has_return = self.current_function_has_return
+        previous_behavior = self.inside_behavior
 
         self.variables = {}
         self.current_function = node
+        self.inside_behavior = False
         self.current_function_has_return = False
 
         if node.return_type is None:
@@ -137,8 +151,8 @@ class SemanticAnalyzer:
         for parameter in node.parameters:
             if parameter.name in self.variables:
                 self._error(
-                    f"Parameter '{parameter.name}' is already declared "
-                    f"in function '{node.name}'."
+                    f"Parameter '{parameter.name}' is already "
+                    f"declared in function '{node.name}'."
                 )
                 continue
 
@@ -169,6 +183,7 @@ class SemanticAnalyzer:
         self.current_function = previous_function
         self.current_return_type = previous_return_type
         self.current_function_has_return = previous_has_return
+        self.inside_behavior = previous_behavior
 
     def _variable(self, node: VariableDeclaration) -> None:
         if node.name in self.variables:
@@ -230,13 +245,17 @@ class SemanticAnalyzer:
             self._expression_type(node)
 
     def _return(self, node: ReturnStatement) -> None:
-        self.current_function_has_return = True
-
         if self.current_function is None:
+            if self.inside_behavior:
+                return
+
             self._error(
-                "Return statement is only valid inside a function."
+                "Return statement is only valid inside "
+                "a function or behavior."
             )
             return
+
+        self.current_function_has_return = True
 
         if node.value is None:
             if (
