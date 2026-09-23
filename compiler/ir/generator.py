@@ -11,6 +11,7 @@ from language.ast import (
     Literal,
     Program,
     ReturnStatement,
+    UnaryExpression,
     VariableDeclaration,
     WhileStatement,
 )
@@ -112,9 +113,7 @@ class IRGenerator:
             self._expression(node.value)
 
         self._emit(
-            Instruction(
-                OpCode.RETURN
-            )
+            Instruction(OpCode.RETURN)
         )
 
     def _expression(self, node) -> None:
@@ -140,15 +139,12 @@ class IRGenerator:
             self._assignment(node)
             return
 
-        if isinstance(node, BinaryExpression):
-            self._expression(node.left)
-            self._expression(node.right)
+        if isinstance(node, UnaryExpression):
+            self._unary(node)
+            return
 
-            self._emit(
-                Instruction(
-                    self._binary_opcode(node.operator)
-                )
-            )
+        if isinstance(node, BinaryExpression):
+            self._binary(node)
             return
 
         if isinstance(node, FunctionCall):
@@ -165,6 +161,35 @@ class IRGenerator:
 
         raise TypeError(
             f"Unsupported AST node: {type(node).__name__}"
+        )
+
+    def _unary(self, node: UnaryExpression) -> None:
+        self._expression(node.operand)
+
+        opcode_map = {
+            "-": OpCode.NEGATE,
+            "!": OpCode.NOT,
+        }
+
+        opcode = opcode_map.get(node.operator)
+
+        if opcode is None:
+            raise ValueError(
+                f"Unsupported unary operator: {node.operator}"
+            )
+
+        self._emit(
+            Instruction(opcode)
+        )
+
+    def _binary(self, node: BinaryExpression) -> None:
+        self._expression(node.left)
+        self._expression(node.right)
+
+        self._emit(
+            Instruction(
+                self._binary_opcode(node.operator)
+            )
         )
 
     def _if_statement(self, node: IfStatement) -> None:
@@ -331,12 +356,16 @@ class IRGenerator:
             "*": OpCode.MUL,
             "/": OpCode.DIV,
             "%": OpCode.MOD,
+
             "==": OpCode.EQUAL,
             "!=": OpCode.NOT_EQUAL,
             "<": OpCode.LESS,
             "<=": OpCode.LESS_EQUAL,
             ">": OpCode.GREATER,
             ">=": OpCode.GREATER_EQUAL,
+
+            "&&": OpCode.AND,
+            "||": OpCode.OR,
         }
 
         if operator not in operators:
