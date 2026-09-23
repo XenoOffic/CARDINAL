@@ -47,7 +47,10 @@ class VM:
         instructions = function.instructions
 
         while frame.instruction_pointer < len(instructions):
-            instruction = instructions[frame.instruction_pointer]
+            instruction = instructions[
+                frame.instruction_pointer
+            ]
+
             opcode = instruction.opcode
             stack = frame.operand_stack
 
@@ -58,7 +61,9 @@ class VM:
                 name = instruction.operand
 
                 if not isinstance(name, str):
-                    raise VMError("LOAD requires a variable name")
+                    raise VMError(
+                        "LOAD requires a variable name"
+                    )
 
                 if name not in frame.locals:
                     raise VMError(
@@ -98,37 +103,106 @@ class VM:
                 frame.locals[name] = stack.pop()
 
             elif opcode == OpCode.ADD:
-                self._binary(frame, lambda a, b: a + b)
+                self._binary(
+                    frame,
+                    lambda a, b: a + b,
+                )
 
             elif opcode == OpCode.SUB:
-                self._binary(frame, lambda a, b: a - b)
+                self._binary(
+                    frame,
+                    lambda a, b: a - b,
+                )
 
             elif opcode == OpCode.MUL:
-                self._binary(frame, lambda a, b: a * b)
+                self._binary(
+                    frame,
+                    lambda a, b: a * b,
+                )
 
             elif opcode == OpCode.DIV:
-                self._binary(frame, lambda a, b: a / b)
+                self._binary(
+                    frame,
+                    lambda a, b: a / b,
+                )
 
             elif opcode == OpCode.MOD:
-                self._binary(frame, lambda a, b: a % b)
+                self._binary(
+                    frame,
+                    lambda a, b: a % b,
+                )
+
+            elif opcode == OpCode.NEGATE:
+                if not stack:
+                    raise VMError(
+                        "Stack underflow during NEGATE"
+                    )
+
+                value = stack.pop()
+
+                try:
+                    stack.append(-value)
+                except Exception as exc:
+                    raise VMError(
+                        f"Unary negation failed: {exc}"
+                    ) from exc
+
+            elif opcode == OpCode.NOT:
+                if not stack:
+                    raise VMError(
+                        "Stack underflow during NOT"
+                    )
+
+                value = stack.pop()
+                stack.append(not value)
 
             elif opcode == OpCode.EQUAL:
-                self._binary(frame, lambda a, b: a == b)
+                self._binary(
+                    frame,
+                    lambda a, b: a == b,
+                )
 
             elif opcode == OpCode.NOT_EQUAL:
-                self._binary(frame, lambda a, b: a != b)
+                self._binary(
+                    frame,
+                    lambda a, b: a != b,
+                )
 
             elif opcode == OpCode.LESS:
-                self._binary(frame, lambda a, b: a < b)
+                self._binary(
+                    frame,
+                    lambda a, b: a < b,
+                )
 
             elif opcode == OpCode.LESS_EQUAL:
-                self._binary(frame, lambda a, b: a <= b)
+                self._binary(
+                    frame,
+                    lambda a, b: a <= b,
+                )
 
             elif opcode == OpCode.GREATER:
-                self._binary(frame, lambda a, b: a > b)
+                self._binary(
+                    frame,
+                    lambda a, b: a > b,
+                )
 
             elif opcode == OpCode.GREATER_EQUAL:
-                self._binary(frame, lambda a, b: a >= b)
+                self._binary(
+                    frame,
+                    lambda a, b: a >= b,
+                )
+
+            elif opcode == OpCode.AND:
+                self._binary(
+                    frame,
+                    lambda a, b: a and b,
+                )
+
+            elif opcode == OpCode.OR:
+                self._binary(
+                    frame,
+                    lambda a, b: a or b,
+                )
 
             elif opcode == OpCode.CALL:
                 result = self._call(
@@ -161,10 +235,18 @@ class VM:
                     continue
 
             elif opcode == OpCode.RETURN:
-                result = stack.pop() if stack else None
+                result = (
+                    stack.pop()
+                    if stack
+                    else None
+                )
+
                 frame.return_value = result
 
-                if self.frames and self.frames[-1] is frame:
+                if (
+                    self.frames
+                    and self.frames[-1] is frame
+                ):
                     self.frames.pop()
 
                 return result
@@ -215,7 +297,10 @@ class VM:
 
         argument_count = len(target.parameters)
 
-        if len(caller_frame.operand_stack) < argument_count:
+        if (
+            len(caller_frame.operand_stack)
+            < argument_count
+        ):
             raise VMError(
                 f"Not enough arguments for "
                 f"function '{function_name}'"
