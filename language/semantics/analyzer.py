@@ -24,6 +24,7 @@ from language.types import (
     STRING,
     UNKNOWN,
     CardinalType,
+    function_type,
 )
 
 
@@ -35,6 +36,7 @@ class SemanticAnalyzer:
     def __init__(self) -> None:
         self.variables: dict[str, CardinalType] = {}
         self.functions: dict[str, FunctionDeclaration] = {}
+        self.function_types: dict[str, CardinalType] = {}
         self.agents: set[str] = set()
         self.errors: list[str] = []
 
@@ -73,6 +75,30 @@ class SemanticAnalyzer:
             return
 
         self.functions[node.name] = node
+
+        parameter_types: list[CardinalType] = []
+
+        for parameter in node.parameters:
+            if parameter.type_name is None:
+                parameter_types.append(ANY)
+            else:
+                parameter_types.append(
+                    self._resolve_type(
+                        parameter.type_name
+                    )
+                )
+
+        if node.return_type is None:
+            return_type = ANY
+        else:
+            return_type = self._resolve_type(
+                node.return_type
+            )
+
+        self.function_types[node.name] = function_type(
+            parameter_types,
+            return_type,
+        )
 
     def _declaration(self, node) -> None:
         if isinstance(node, AgentDeclaration):
@@ -122,6 +148,7 @@ class SemanticAnalyzer:
 
     def _behavior(self, node: BehaviorDeclaration) -> None:
         previous_behavior = self.inside_behavior
+
         self.inside_behavior = True
 
         for statement in node.body:
@@ -141,27 +168,35 @@ class SemanticAnalyzer:
         self.inside_behavior = False
         self.current_function_has_return = False
 
-        if node.return_type is None:
-            self.current_return_type = ANY
-        else:
-            self.current_return_type = self._resolve_type(
-                node.return_type
+        function_signature = self.function_types.get(
+            node.name
+        )
+
+        if function_signature is None:
+            self._register_function(node)
+            function_signature = self.function_types[
+                node.name
+            ]
+
+        self.current_return_type = (
+            function_signature.return_type
+            if function_signature.return_type is not None
+            else ANY
+        )
+
+        for index, parameter in enumerate(
+            node.parameters
+        ):
+            parameter_type = (
+                function_signature.parameters[index]
             )
 
-        for parameter in node.parameters:
             if parameter.name in self.variables:
                 self._error(
                     f"Parameter '{parameter.name}' is already "
                     f"declared in function '{node.name}'."
                 )
                 continue
-
-            if parameter.type_name is None:
-                parameter_type = ANY
-            else:
-                parameter_type = self._resolve_type(
-                    parameter.type_name
-                )
 
             self.variables[parameter.name] = parameter_type
 
@@ -195,7 +230,9 @@ class SemanticAnalyzer:
         value_type = UNKNOWN
 
         if node.value is not None:
-            value_type = self._expression_type(node.value)
+            value_type = self._expression_type(
+                node.value
+            )
 
         if node.type_name is not None:
             declared_type = self._resolve_type(
@@ -268,7 +305,9 @@ class SemanticAnalyzer:
                 )
             return
 
-        value_type = self._expression_type(node.value)
+        value_type = self._expression_type(
+            node.value
+        )
 
         if not self._compatible(
             self.current_return_type,
@@ -290,8 +329,13 @@ class SemanticAnalyzer:
             )
             return
 
-        value_type = self._expression_type(node.value)
-        variable_type = self.variables[node.target]
+        value_type = self._expression_type(
+            node.value
+        )
+
+        variable_type = self.variables[
+            node.target
+        ]
 
         if not self._compatible(
             variable_type,
@@ -303,7 +347,10 @@ class SemanticAnalyzer:
                 f"of type {variable_type}."
             )
 
-    def _expression_type(self, node) -> CardinalType:
+    def _expression_type(
+        self,
+        node,
+    ) -> CardinalType:
         if isinstance(node, Literal):
             if isinstance(node.value, bool):
                 return BOOL
@@ -333,8 +380,13 @@ class SemanticAnalyzer:
             return self._function_call_type(node)
 
         if isinstance(node, BinaryExpression):
-            left_type = self._expression_type(node.left)
-            right_type = self._expression_type(node.right)
+            left_type = self._expression_type(
+                node.left
+            )
+
+            right_type = self._expression_type(
+                node.right
+            )
 
             if (
                 left_type == UNKNOWN
@@ -373,6 +425,7 @@ class SemanticAnalyzer:
                     f"'{node.operator}': "
                     f"{left_type} and {right_type}."
                 )
+
                 return UNKNOWN
 
             if node.operator in {
@@ -415,7 +468,7 @@ class SemanticAnalyzer:
         self,
         node: FunctionCall,
     ) -> CardinalType:
-        if node.name not in self.functions:
+        if node.name not in self.function_types:
             self._error(
                 f"Unknown function '{node.name}'."
             )
@@ -425,10 +478,17 @@ class SemanticAnalyzer:
 
             return UNKNOWN
 
-        function = self.functions[node.name]
+        signature = self.function_types[
+            node.name
+        ]
 
-        expected_count = len(function.parameters)
-        actual_count = len(node.arguments)
+        expected_count = len(
+            signature.parameters
+        )
+
+        actual_count = len(
+            node.arguments
+        )
 
         if expected_count != actual_count:
             self._error(
@@ -447,14 +507,9 @@ class SemanticAnalyzer:
                 node.arguments[index]
             )
 
-            parameter = function.parameters[index]
-
-            if parameter.type_name is None:
-                continue
-
-            parameter_type = self._resolve_type(
-                parameter.type_name
-            )
+            parameter_type = signature.parameters[
+                index
+            ]
 
             if not self._compatible(
                 parameter_type,
@@ -470,19 +525,22 @@ class SemanticAnalyzer:
         for argument in node.arguments[count:]:
             self._expression_type(argument)
 
-        if function.return_type is None:
-            return ANY
-
-        return self._resolve_type(
-            function.return_type
+        return (
+            signature.return_type
+            if signature.return_type is not None
+            else ANY
         )
 
-    def _resolve_type(self, name: str) -> CardinalType:
+    def _resolve_type(
+        self,
+        name: str,
+    ) -> CardinalType:
         types = {
             "Int": INT,
             "Float": FLOAT,
             "Bool": BOOL,
             "String": STRING,
+            "Unit": self._unit_type(),
             "Any": ANY,
         }
 
@@ -494,12 +552,20 @@ class SemanticAnalyzer:
             ),
         )
 
+    def _unit_type(self) -> CardinalType:
+        from language.types import UNIT
+
+        return UNIT
+
     def _compatible(
         self,
         expected: CardinalType,
         actual: CardinalType,
     ) -> bool:
-        if expected == ANY or actual == UNKNOWN:
+        if expected == ANY:
+            return True
+
+        if actual == UNKNOWN:
             return True
 
         return expected == actual
