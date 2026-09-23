@@ -3,6 +3,7 @@ from __future__ import annotations
 from language.ast import (
     AgentDeclaration,
     AssignmentExpression,
+    BehaviorDeclaration,
     BinaryExpression,
     FunctionCall,
     FunctionDeclaration,
@@ -17,18 +18,37 @@ from language.ast import (
 )
 
 from .instructions import Instruction, OpCode
-from .module import IRFunction, IRModule
+from .module import (
+    IRAgent,
+    IRBehavior,
+    IRFunction,
+    IRModule,
+)
 
 
 class IRGenerator:
-    """Converts CARDINAL AST nodes into intermediate representation."""
+    """
+    Converts CARDINAL AST nodes into intermediate representation.
+
+    The generator produces:
+    - normal functions
+    - agents
+    - agent state
+    - agent behaviors
+    """
 
     def __init__(self) -> None:
         self.module = IRModule()
         self.current_function: IRFunction | None = None
+        self.current_behavior: IRBehavior | None = None
+        self.current_agent: IRAgent | None = None
 
     def generate(self, program: Program) -> IRModule:
         self.module = IRModule()
+
+        self.current_function = None
+        self.current_behavior = None
+        self.current_agent = None
 
         main = IRFunction(name="main")
         self.current_function = main
@@ -43,12 +63,25 @@ class IRGenerator:
             else:
                 self._declaration(declaration)
 
-        main.emit(Instruction(OpCode.HALT))
+        main.emit(
+            Instruction(OpCode.HALT)
+        )
+
         self.module.add_function(main)
+
+        self.current_function = None
 
         return self.module
 
-    def _function(self, node: FunctionDeclaration) -> None:
+    # ---------------------------------------------------------
+    # Functions
+    # ---------------------------------------------------------
+
+    def _function(
+        self,
+        node: FunctionDeclaration,
+        target_agent: IRAgent | None = None,
+    ) -> IRFunction:
         function = IRFunction(
             name=node.name,
             parameters=[
@@ -58,30 +91,124 @@ class IRGenerator:
         )
 
         previous_function = self.current_function
+        previous_behavior = self.current_behavior
+        previous_agent = self.current_agent
+
         self.current_function = function
+        self.current_behavior = None
+
+        if target_agent is not None:
+            self.current_agent = target_agent
 
         for statement in node.body:
             self._declaration(statement)
 
-        if not function.instructions or (
-            function.instructions[-1].opcode
+        if (
+            not function.instructions
+            or function.instructions[-1].opcode
             != OpCode.RETURN
         ):
             function.emit(
                 Instruction(OpCode.RETURN)
             )
 
+        if target_agent is not None:
+            target_agent.add_function(function)
+
         self.module.add_function(function)
 
         self.current_function = previous_function
+        self.current_behavior = previous_behavior
+        self.current_agent = previous_agent
 
-    def _agent(self, node: AgentDeclaration) -> None:
+        return function
+
+    # ---------------------------------------------------------
+    # Agents
+    # ---------------------------------------------------------
+
+    def _agent(
+        self,
+        node: AgentDeclaration,
+    ) -> None:
+        agent = IRAgent(
+            name=node.name,
+            parent=node.parent,
+        )
+
+        previous_agent = self.current_agent
+        previous_function = self.current_function
+        previous_behavior = self.current_behavior
+
+        self.current_agent = agent
+        self.current_behavior = None
+
         for member in node.members:
-            if isinstance(member, FunctionDeclaration):
-                self._function(member)
+            if isinstance(member, VariableDeclaration):
+                agent.add_state(member.name)
 
-            elif isinstance(member, VariableDeclaration):
-                self._declaration(member)
+            elif isinstance(member, BehaviorDeclaration):
+                self._behavior(
+                    member,
+                    agent,
+                )
+
+            elif isinstance(member, FunctionDeclaration):
+                self._function(
+                    member,
+                    target_agent=agent,
+                )
+
+        self.module.add_agent(agent)
+
+        self.current_agent = previous_agent
+        self.current_function = previous_function
+        self.current_behavior = previous_behavior
+
+    # ---------------------------------------------------------
+    # Behaviors
+    # ---------------------------------------------------------
+
+    def _behavior(
+        self,
+        node: BehaviorDeclaration,
+        agent: IRAgent,
+    ) -> IRBehavior:
+        behavior = IRBehavior(
+            name=node.name,
+        )
+
+        previous_behavior = self.current_behavior
+        previous_function = self.current_function
+        previous_agent = self.current_agent
+
+        self.current_behavior = behavior
+        self.current_function = None
+        self.current_agent = agent
+
+        for statement in node.body:
+            self._declaration(statement)
+
+        if (
+            not behavior.instructions
+            or behavior.instructions[-1].opcode
+            != OpCode.RETURN
+        ):
+            behavior.emit(
+                Instruction(OpCode.RETURN)
+            )
+
+        agent.add_behavior(behavior)
+
+        self.current_behavior = previous_behavior
+        self.current_function = previous_function
+        self.current_agent = previous_agent
+
+        return behavior
+
+    # ---------------------------------------------------------
+    # Declarations
+    # ---------------------------------------------------------
 
     def _declaration(self, node) -> None:
         if isinstance(node, VariableDeclaration):
@@ -102,6 +229,10 @@ class IRGenerator:
         elif isinstance(node, list):
             self._block(node)
 
+    # ---------------------------------------------------------
+    # Blocks
+    # ---------------------------------------------------------
+
     def _block(self, statements: list) -> None:
         self._emit(
             Instruction(OpCode.ENTER_SCOPE)
@@ -113,6 +244,10 @@ class IRGenerator:
         self._emit(
             Instruction(OpCode.EXIT_SCOPE)
         )
+
+    # ---------------------------------------------------------
+    # Variables
+    # ---------------------------------------------------------
 
     def _variable(
         self,
@@ -128,13 +263,24 @@ class IRGenerator:
             )
         )
 
-    def _return(self, node: ReturnStatement) -> None:
+    # ---------------------------------------------------------
+    # Return
+    # ---------------------------------------------------------
+
+    def _return(
+        self,
+        node: ReturnStatement,
+    ) -> None:
         if node.value is not None:
             self._expression(node.value)
 
         self._emit(
             Instruction(OpCode.RETURN)
         )
+
+    # ---------------------------------------------------------
+    # Expressions
+    # ---------------------------------------------------------
 
     def _expression(self, node) -> None:
         if isinstance(node, Literal):
@@ -180,10 +326,18 @@ class IRGenerator:
             return
 
         raise TypeError(
-            f"Unsupported AST node: {type(node).__name__}"
+            f"Unsupported AST node: "
+            f"{type(node).__name__}"
         )
 
-    def _unary(self, node: UnaryExpression) -> None:
+    # ---------------------------------------------------------
+    # Unary expressions
+    # ---------------------------------------------------------
+
+    def _unary(
+        self,
+        node: UnaryExpression,
+    ) -> None:
         self._expression(node.operand)
 
         opcode_map = {
@@ -191,32 +345,51 @@ class IRGenerator:
             "!": OpCode.NOT,
         }
 
-        opcode = opcode_map.get(node.operator)
+        opcode = opcode_map.get(
+            node.operator
+        )
 
         if opcode is None:
             raise ValueError(
-                f"Unsupported unary operator: {node.operator}"
+                "Unsupported unary operator: "
+                f"{node.operator}"
             )
 
         self._emit(
             Instruction(opcode)
         )
 
-    def _binary(self, node: BinaryExpression) -> None:
+    # ---------------------------------------------------------
+    # Binary expressions
+    # ---------------------------------------------------------
+
+    def _binary(
+        self,
+        node: BinaryExpression,
+    ) -> None:
         self._expression(node.left)
         self._expression(node.right)
 
         self._emit(
             Instruction(
-                self._binary_opcode(node.operator)
+                self._binary_opcode(
+                    node.operator
+                )
             )
         )
 
-    def _if_statement(self, node: IfStatement) -> None:
+    # ---------------------------------------------------------
+    # If
+    # ---------------------------------------------------------
+
+    def _if_statement(
+        self,
+        node: IfStatement,
+    ) -> None:
         self._expression(node.condition)
 
         jump_if_false = len(
-            self.current_function.instructions
+            self._instructions()
         )
 
         self._emit(
@@ -230,7 +403,7 @@ class IRGenerator:
 
         if node.else_body:
             jump_end = len(
-                self.current_function.instructions
+                self._instructions()
             )
 
             self._emit(
@@ -241,53 +414,60 @@ class IRGenerator:
             )
 
             else_start = len(
-                self.current_function.instructions
+                self._instructions()
             )
 
-            self.current_function.instructions[
-                jump_if_false
-            ] = Instruction(
-                OpCode.JUMP_IF_FALSE,
-                else_start,
+            self._replace_instruction(
+                jump_if_false,
+                Instruction(
+                    OpCode.JUMP_IF_FALSE,
+                    else_start,
+                ),
             )
 
             self._block(node.else_body)
 
             end = len(
-                self.current_function.instructions
+                self._instructions()
             )
 
-            self.current_function.instructions[
-                jump_end
-            ] = Instruction(
-                OpCode.JUMP,
-                end,
+            self._replace_instruction(
+                jump_end,
+                Instruction(
+                    OpCode.JUMP,
+                    end,
+                ),
             )
 
         else:
             end = len(
-                self.current_function.instructions
+                self._instructions()
             )
 
-            self.current_function.instructions[
-                jump_if_false
-            ] = Instruction(
-                OpCode.JUMP_IF_FALSE,
-                end,
+            self._replace_instruction(
+                jump_if_false,
+                Instruction(
+                    OpCode.JUMP_IF_FALSE,
+                    end,
+                ),
             )
+
+    # ---------------------------------------------------------
+    # While
+    # ---------------------------------------------------------
 
     def _while_statement(
         self,
         node: WhileStatement,
     ) -> None:
         loop_start = len(
-            self.current_function.instructions
+            self._instructions()
         )
 
         self._expression(node.condition)
 
         jump_exit = len(
-            self.current_function.instructions
+            self._instructions()
         )
 
         self._emit(
@@ -307,22 +487,29 @@ class IRGenerator:
         )
 
         loop_end = len(
-            self.current_function.instructions
+            self._instructions()
         )
 
-        self.current_function.instructions[
-            jump_exit
-        ] = Instruction(
-            OpCode.JUMP_IF_FALSE,
-            loop_end,
+        self._replace_instruction(
+            jump_exit,
+            Instruction(
+                OpCode.JUMP_IF_FALSE,
+                loop_end,
+            ),
         )
+
+    # ---------------------------------------------------------
+    # Assignment
+    # ---------------------------------------------------------
 
     def _assignment(
         self,
         expression: AssignmentExpression,
     ) -> None:
         if expression.operator == "=":
-            self._expression(expression.value)
+            self._expression(
+                expression.value
+            )
 
             self._emit(
                 Instruction(
@@ -339,7 +526,9 @@ class IRGenerator:
             )
         )
 
-        self._expression(expression.value)
+        self._expression(
+            expression.value
+        )
 
         operator_map = {
             "+=": OpCode.ADD,
@@ -369,7 +558,14 @@ class IRGenerator:
             )
         )
 
-    def _binary_opcode(self, operator: str) -> OpCode:
+    # ---------------------------------------------------------
+    # Opcode mapping
+    # ---------------------------------------------------------
+
+    def _binary_opcode(
+        self,
+        operator: str,
+    ) -> OpCode:
         operators = {
             "+": OpCode.ADD,
             "-": OpCode.SUB,
@@ -390,15 +586,40 @@ class IRGenerator:
 
         if operator not in operators:
             raise ValueError(
-                f"Unsupported binary operator: {operator}"
+                f"Unsupported binary operator: "
+                f"{operator}"
             )
 
         return operators[operator]
 
-    def _emit(self, instruction: Instruction) -> None:
-        if self.current_function is None:
-            raise RuntimeError(
-                "IR generator has no active function."
-            )
+    # ---------------------------------------------------------
+    # Current instruction stream
+    # ---------------------------------------------------------
 
-        self.current_function.emit(instruction)
+    def _instructions(self) -> list[Instruction]:
+        if self.current_behavior is not None:
+            return self.current_behavior.instructions
+
+        if self.current_function is not None:
+            return self.current_function.instructions
+
+        raise RuntimeError(
+            "IR generator has no active instruction stream."
+        )
+
+    def _emit(
+        self,
+        instruction: Instruction,
+    ) -> None:
+        self._instructions().append(
+            instruction
+        )
+
+    def _replace_instruction(
+        self,
+        index: int,
+        instruction: Instruction,
+    ) -> None:
+        instructions = self._instructions()
+
+        instructions[index] = instruction
