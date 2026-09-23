@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum, auto
+from typing import Callable, Iterable
 
 from compiler.ir import (
     IRAgent,
@@ -17,6 +19,123 @@ class VMError(Exception):
     """Raised when the CARDINAL VM encounters an execution error."""
 
 
+class AgentLifecycle(Enum):
+    """Lifecycle states of a CARDINAL agent."""
+
+    CREATED = auto()
+    RUNNING = auto()
+    STOPPED = auto()
+
+
+@dataclass(frozen=True)
+class AgentEvent:
+    """Event delivered to a CARDINAL agent."""
+
+    type: str
+    payload: object | None = None
+    source: str | None = None
+
+
+@dataclass
+class AgentContext:
+    """
+    Runtime context owned by an agent instance.
+
+    The context contains runtime-only information such as
+    capabilities, lifecycle state and execution limits.
+    """
+
+    lifecycle: AgentLifecycle = AgentLifecycle.CREATED
+
+    capabilities: set[str] = field(
+        default_factory=set
+    )
+
+    max_instructions: int | None = None
+
+    behavior_bindings: dict[str, str] = field(
+        default_factory=dict
+    )
+
+    events_processed: int = 0
+    instructions_executed: int = 0
+
+    def grant(self, capability: str) -> None:
+        """Grant a capability to the agent."""
+        if not capability:
+            raise VMError(
+                "Capability name cannot be empty."
+            )
+
+        self.capabilities.add(capability)
+
+    def revoke(self, capability: str) -> None:
+        """Revoke a capability from the agent."""
+        self.capabilities.discard(capability)
+
+    def has_capability(
+        self,
+        capability: str,
+    ) -> bool:
+        return capability in self.capabilities
+
+    def require_capability(
+        self,
+        capability: str,
+    ) -> None:
+        if not self.has_capability(capability):
+            raise VMError(
+                f"Agent lacks capability: "
+                f"{capability}"
+            )
+
+    def bind_event(
+        self,
+        event_type: str,
+        behavior_name: str,
+    ) -> None:
+        """Bind an event type to an agent behavior."""
+
+        if not event_type:
+            raise VMError(
+                "Event type cannot be empty."
+            )
+
+        if not behavior_name:
+            raise VMError(
+                "Behavior name cannot be empty."
+            )
+
+        self.behavior_bindings[event_type] = (
+            behavior_name
+        )
+
+    def resolve_behavior(
+        self,
+        event: AgentEvent,
+    ) -> str | None:
+        """
+        Resolve the behavior associated with an event.
+
+        Explicit event bindings have priority. If none
+        exists, the event type itself is treated as the
+        behavior name.
+        """
+
+        behavior = self.behavior_bindings.get(
+            event.type
+        )
+
+        if behavior is not None:
+            return behavior
+
+        return event.type
+
+    def reset_counters(self) -> None:
+        self.events_processed = 0
+        self.instructions_executed = 0
+
+
 @dataclass
 class AgentInstance:
     """Runtime instance of a CARDINAL agent."""
@@ -25,6 +144,14 @@ class AgentInstance:
 
     state: dict[str, object] = field(
         default_factory=dict
+    )
+
+    context: AgentContext = field(
+        default_factory=AgentContext
+    )
+
+    event_queue: list[AgentEvent] = field(
+        default_factory=list
     )
 
     def __post_init__(self) -> None:
@@ -43,6 +170,10 @@ class AgentInstance:
     def name(self) -> str:
         return self.agent.name
 
+    @property
+    def lifecycle(self) -> AgentLifecycle:
+        return self.context.lifecycle
+
     def get_behavior(
         self,
         name: str,
@@ -55,6 +186,47 @@ class AgentInstance:
     ) -> IRFunction | None:
         return self.agent.get_function(name)
 
+    def start(self) -> None:
+        """Move the agent into the RUNNING state."""
+
+        if (
+            self.context.lifecycle
+            == AgentLifecycle.STOPPED
+        ):
+            raise VMError(
+                f"Agent '{self.name}' "
+                "cannot be restarted."
+            )
+
+        self.context.lifecycle = (
+            AgentLifecycle.RUNNING
+        )
+
+    def stop(self) -> None:
+        """Stop the agent and clear pending events."""
+
+        self.context.lifecycle = (
+            AgentLifecycle.STOPPED
+        )
+
+        self.event_queue.clear()
+
+    def emit(
+        self,
+        event: AgentEvent,
+    ) -> None:
+        """Queue an event for this agent."""
+
+        if (
+            self.context.lifecycle
+            == AgentLifecycle.STOPPED
+        ):
+            raise VMError(
+                f"Agent '{self.name}' is stopped."
+            )
+
+        self.event_queue.append(event)
+
 
 class VM:
     """Stack-based virtual machine for CARDINAL IR."""
@@ -62,8 +234,16 @@ class VM:
     def __init__(self) -> None:
         self.frames: list[CallFrame] = []
         self.return_value: object | None = None
+
         self.agents: list[AgentInstance] = []
+
         self.current_agent: AgentInstance | None = None
+
+        self._instruction_budget: int | None = None
+
+    # ------------------------------------------------------------------
+    # Core execution
+    # ------------------------------------------------------------------
 
     def execute(
         self,
@@ -73,6 +253,7 @@ class VM:
         self.frames.clear()
         self.return_value = None
         self.current_agent = None
+        self._instruction_budget = None
 
         frame = CallFrame(
             function_name=function.name
@@ -91,10 +272,20 @@ class VM:
 
         return result
 
+    # ------------------------------------------------------------------
+    # Agent lifecycle
+    # ------------------------------------------------------------------
+
     def spawn_agent(
         self,
         agent: IRAgent,
     ) -> AgentInstance:
+        """
+        Create a runtime instance of an agent.
+
+        Newly spawned agents start in CREATED state.
+        """
+
         instance = AgentInstance(agent)
 
         self.agents.append(instance)
@@ -115,6 +306,226 @@ class VM:
 
         return self.spawn_agent(agent)
 
+    def start_agent(
+        self,
+        instance: AgentInstance,
+    ) -> AgentInstance:
+        """Start an agent."""
+
+        instance.start()
+
+        return instance
+
+    def stop_agent(
+        self,
+        instance: AgentInstance,
+    ) -> None:
+        """Stop an agent."""
+
+        instance.stop()
+
+    # ------------------------------------------------------------------
+    # Capabilities
+    # ------------------------------------------------------------------
+
+    def grant_capability(
+        self,
+        instance: AgentInstance,
+        capability: str,
+    ) -> None:
+        instance.context.grant(
+            capability
+        )
+
+    def revoke_capability(
+        self,
+        instance: AgentInstance,
+        capability: str,
+    ) -> None:
+        instance.context.revoke(
+            capability
+        )
+
+    def require_capability(
+        self,
+        instance: AgentInstance,
+        capability: str,
+    ) -> None:
+        instance.context.require_capability(
+            capability
+        )
+
+    # ------------------------------------------------------------------
+    # Event system
+    # ------------------------------------------------------------------
+
+    def bind_behavior(
+        self,
+        instance: AgentInstance,
+        event_type: str,
+        behavior_name: str,
+    ) -> None:
+        """
+        Bind an event type to a behavior.
+
+        Example:
+
+            vm.bind_behavior(
+                agent,
+                "tick",
+                "update",
+            )
+        """
+
+        behavior = instance.get_behavior(
+            behavior_name
+        )
+
+        if behavior is None:
+            raise VMError(
+                f"Unknown behavior "
+                f"'{behavior_name}' "
+                f"for agent '{instance.name}'"
+            )
+
+        instance.context.bind_event(
+            event_type,
+            behavior_name,
+        )
+
+    def emit_event(
+        self,
+        instance: AgentInstance,
+        event: AgentEvent,
+    ) -> None:
+        """
+        Emit an event into an agent's event queue.
+        """
+
+        instance.emit(event)
+
+    def dispatch_event(
+        self,
+        instance: AgentInstance,
+        event: AgentEvent,
+        module: IRModule | None = None,
+    ) -> object | None:
+        """
+        Observe an event, resolve its behavior and execute it.
+        """
+
+        if (
+            instance.context.lifecycle
+            == AgentLifecycle.STOPPED
+        ):
+            raise VMError(
+                f"Agent '{instance.name}' is stopped."
+            )
+
+        if (
+            instance.context.lifecycle
+            == AgentLifecycle.CREATED
+        ):
+            instance.start()
+
+        behavior_name = (
+            instance.context.resolve_behavior(
+                event
+            )
+        )
+
+        if behavior_name is None:
+            return None
+
+        behavior = instance.get_behavior(
+            behavior_name
+        )
+
+        if behavior is None:
+            raise VMError(
+                f"No behavior '{behavior_name}' "
+                f"for event '{event.type}' "
+                f"on agent '{instance.name}'"
+            )
+
+        result = self.execute_behavior(
+            instance,
+            behavior_name,
+            module,
+        )
+
+        instance.context.events_processed += 1
+
+        return result
+
+    def process_next_event(
+        self,
+        instance: AgentInstance,
+        module: IRModule | None = None,
+    ) -> object | None:
+        """
+        Process one pending event.
+
+        Returns the behavior result or None when the
+        queue is empty.
+        """
+
+        if not instance.event_queue:
+            return None
+
+        event = instance.event_queue.pop(0)
+
+        return self.dispatch_event(
+            instance,
+            event,
+            module,
+        )
+
+    def run_until_idle(
+        self,
+        instance: AgentInstance,
+        module: IRModule | None = None,
+        max_events: int | None = None,
+    ) -> list[object | None]:
+        """
+        Process queued events until the agent becomes idle.
+
+        max_events prevents unbounded event processing.
+        """
+
+        if max_events is not None and max_events < 0:
+            raise VMError(
+                "max_events cannot be negative."
+            )
+
+        results: list[object | None] = []
+
+        processed = 0
+
+        while instance.event_queue:
+            if (
+                max_events is not None
+                and processed >= max_events
+            ):
+                raise VMError(
+                    "Event processing limit exceeded."
+                )
+
+            results.append(
+                self.process_next_event(
+                    instance,
+                    module,
+                )
+            )
+
+            processed += 1
+
+        return results
+
+    # ------------------------------------------------------------------
+    # Behavior execution
+    # ------------------------------------------------------------------
+
     def execute_behavior(
         self,
         instance: AgentInstance,
@@ -132,9 +543,27 @@ class VM:
                 f"for agent '{instance.name}'"
             )
 
+        if (
+            instance.context.lifecycle
+            == AgentLifecycle.STOPPED
+        ):
+            raise VMError(
+                f"Agent '{instance.name}' is stopped."
+            )
+
+        if (
+            instance.context.lifecycle
+            == AgentLifecycle.CREATED
+        ):
+            instance.start()
+
         self.frames.clear()
         self.return_value = None
         self.current_agent = instance
+
+        self._instruction_budget = (
+            instance.context.max_instructions
+        )
 
         frame = CallFrame(
             function_name=(
@@ -154,22 +583,23 @@ class VM:
             frame,
         )
 
-        # The behavior frame may have modified agent
-        # state directly. Synchronize only the values
-        # that were actually present in the frame.
-        #
-        # Agent functions synchronize their changes
-        # directly into instance.state, and _call_agent
-        # mirrors those changes back into this frame.
         for name in instance.state:
             if name in frame.locals:
-                instance.state[name] = frame.locals[name]
+                instance.state[name] = (
+                    frame.locals[name]
+                )
 
         self.return_value = result
+
         self.frames.clear()
         self.current_agent = None
+        self._instruction_budget = None
 
         return result
+
+    # ------------------------------------------------------------------
+    # Internal execution
+    # ------------------------------------------------------------------
 
     def _execute_function(
         self,
@@ -205,6 +635,8 @@ class VM:
             frame.instruction_pointer
             < len(instructions)
         ):
+            self._consume_instruction_budget()
+
             instruction = instructions[
                 frame.instruction_pointer
             ]
@@ -400,7 +832,7 @@ class VM:
                     instruction,
                     module,
                     frame,
-                )
+                  )
 
                 if result is not None:
                     stack.append(result)
@@ -455,6 +887,10 @@ class VM:
             frame.instruction_pointer += 1
 
         return frame.return_value
+
+    # ------------------------------------------------------------------
+    # Function calls
+    # ------------------------------------------------------------------
 
     def _call(
         self,
@@ -531,10 +967,6 @@ class VM:
             caller_frame,
         )
 
-        # The agent function is authoritative for
-        # agent state. Mirror the updated state back
-        # into the caller frame so subsequent behavior
-        # instructions see the new values.
         for name, value in (
             self.current_agent.state.items()
         ):
@@ -582,8 +1014,6 @@ class VM:
             )
         )
 
-        # Agent functions receive a snapshot of the
-        # current agent state as their initial locals.
         if self.current_agent is not None:
             for name, value in (
                 self.current_agent.state.items()
@@ -606,8 +1036,6 @@ class VM:
             frame,
         )
 
-        # Persist modifications made by an agent
-        # function back into the actual agent instance.
         if self.current_agent is not None:
             for name in self.current_agent.state:
                 if name in frame.locals:
@@ -617,10 +1045,44 @@ class VM:
 
         return result
 
+    # ------------------------------------------------------------------
+    # Runtime safety
+    # ------------------------------------------------------------------
+
+    def _consume_instruction_budget(self) -> None:
+        """
+        Consume one instruction from the active agent budget.
+
+        None means unlimited.
+        """
+
+        if self.current_agent is None:
+            return
+
+        self.current_agent.context.instructions_executed += 1
+
+        limit = self._instruction_budget
+
+        if limit is None:
+            return
+
+        if (
+            self.current_agent.context.instructions_executed
+            > limit
+        ):
+            raise VMError(
+                f"Instruction limit exceeded "
+                f"for agent '{self.current_agent.name}'."
+            )
+
+    # ------------------------------------------------------------------
+    # Arithmetic / logical operations
+    # ------------------------------------------------------------------
+
     def _binary(
         self,
         frame: CallFrame,
-        operation,
+        operation: Callable[[object, object], object],
     ) -> None:
         stack = frame.operand_stack
 
