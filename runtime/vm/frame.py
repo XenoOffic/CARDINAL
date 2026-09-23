@@ -34,7 +34,11 @@ class CallFrame:
 
         self.scopes.pop()
 
-    def declare(self, name: str, value: object) -> None:
+    def declare(
+        self,
+        name: str,
+        value: object,
+    ) -> None:
         self.scopes[-1][name] = value
 
     def lookup(self, name: str) -> object:
@@ -44,10 +48,16 @@ class CallFrame:
 
         raise KeyError(name)
 
-    def assign(self, name: str, value: object) -> None:
+    def assign(
+        self,
+        name: str,
+        value: object,
+    ) -> None:
         for scope in reversed(self.scopes):
             if name in scope:
                 scope[name] = value
                 return
 
-        raise KeyError(name)
+        # Compatibility with the original CARDINAL IR:
+        # ASSIGN can create a variable when no binding exists.
+        self.scopes[-1][name] = value
