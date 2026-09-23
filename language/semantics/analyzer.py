@@ -2,17 +2,18 @@ from __future__ import annotations
 
 from language.ast import (
     AgentDeclaration,
+    AssignmentExpression,
     BehaviorDeclaration,
+    BinaryExpression,
     Identifier,
+    IfStatement,
     Literal,
     Program,
     ReturnStatement,
     VariableDeclaration,
     WhileStatement,
-    IfStatement,
-    AssignmentExpression,
-    BinaryExpression,
 )
+
 from language.types import (
     ANY,
     BOOL,
@@ -44,12 +45,24 @@ class SemanticAnalyzer:
     def _declaration(self, node) -> None:
         if isinstance(node, AgentDeclaration):
             self._agent(node)
+
         elif isinstance(node, VariableDeclaration):
             self._variable(node)
 
+        elif isinstance(node, WhileStatement):
+            self._statement(node)
+
+        elif isinstance(node, IfStatement):
+            self._statement(node)
+
+        elif isinstance(node, AssignmentExpression):
+            self._statement(node)
+
     def _agent(self, node: AgentDeclaration) -> None:
         if node.name in self.agents:
-            self._error(f"Agent '{node.name}' is already declared.")
+            self._error(
+                f"Agent '{node.name}' is already declared."
+            )
             return
 
         self.agents.add(node.name)
@@ -61,6 +74,7 @@ class SemanticAnalyzer:
             if isinstance(member, BehaviorDeclaration):
                 for statement in member.body:
                     self._statement(statement)
+
             elif isinstance(member, VariableDeclaration):
                 self._variable(member)
 
@@ -92,151 +106,121 @@ class SemanticAnalyzer:
         self.variables[node.name] = value_type
 
     def _statement(self, node) -> None:
-    if isinstance(node, VariableDeclaration):
-        self._variable(node)
+        if isinstance(node, VariableDeclaration):
+            self._variable(node)
 
-    elif isinstance(node, ReturnStatement):
-        if node.value is not None:
-            self._expression_type(node.value)
+        elif isinstance(node, ReturnStatement):
+            if node.value is not None:
+                self._expression_type(node.value)
 
-    elif isinstance(node, IfStatement):
-        self._expression_type(node.condition)
+        elif isinstance(node, IfStatement):
+            self._expression_type(node.condition)
 
-        for statement in node.then_body:
-            self._statement(statement)
+            for statement in node.then_body:
+                self._statement(statement)
 
-        for statement in node.else_body:
-            self._statement(statement)
+            for statement in node.else_body:
+                self._statement(statement)
 
-    elif isinstance(node, WhileStatement):
-        self._expression_type(node.condition)
+        elif isinstance(node, WhileStatement):
+            self._expression_type(node.condition)
 
-        for statement in node.body:
-            self._statement(statement)
+            for statement in node.body:
+                self._statement(statement)
 
-    elif isinstance(node, AssignmentExpression):
-        if node.target not in self.variables:
-            self._error(
-                f"Unknown identifier '{node.target}'."
-            )
-            return
+        elif isinstance(node, AssignmentExpression):
+            if node.target not in self.variables:
+                self._error(
+                    f"Unknown identifier '{node.target}'."
+                )
+                return
 
-        value_type = self._expression_type(node.value)
-        variable_type = self.variables[node.target]
+            value_type = self._expression_type(node.value)
+            variable_type = self.variables[node.target]
 
-        if not self._compatible(variable_type, value_type):
-            self._error(
-                f"Cannot assign {value_type} to "
-                f"variable '{node.target}' of type {variable_type}."
-            )
+            if not self._compatible(variable_type, value_type):
+                self._error(
+                    f"Cannot assign {value_type} to "
+                    f"variable '{node.target}' "
+                    f"of type {variable_type}."
+                )
 
-    elif isinstance(node, ReturnStatement):
-        if node.value is not None:
-            self._expression_type(node.value)
-
-    elif isinstance(node, IfStatement):
-        self._expression_type(node.condition)
-
-        for statement in node.then_body:
-            self._statement(statement)
-
-        for statement in node.else_body:
-            self._statement(statement)
-
-    elif isinstance(node, WhileStatement):
-        self._expression_type(node.condition)
-
-        for statement in node.body:
-            self._statement(statement)
-
-    elif isinstance(node, AssignmentExpression):
-        if node.target not in self.variables:
-            self._error(
-                f"Unknown identifier '{node.target}'."
-            )
-            return
-
-        value_type = self._expression_type(node.value)
-        variable_type = self.variables[node.target]
-
-        if not self._compatible(variable_type, value_type):
-            self._error(
-                f"Cannot assign {value_type} to "
-                f"variable '{node.target}' of type {variable_type}."
-            )
-            
     def _expression_type(self, node) -> CardinalType:
-    if isinstance(node, Literal):
-        if isinstance(node.value, bool):
-            return BOOL
+        if isinstance(node, Literal):
+            if isinstance(node.value, bool):
+                return BOOL
 
-        if isinstance(node.value, int):
-            return INT
-
-        if isinstance(node.value, float):
-            return FLOAT
-
-        if isinstance(node.value, str):
-            return STRING
-
-        if node.value is None:
-            return UNKNOWN
-
-    if isinstance(node, Identifier):
-        if node.name not in self.variables:
-            self._error(
-                f"Unknown identifier '{node.name}'."
-            )
-            return UNKNOWN
-
-        return self.variables[node.name]
-
-    if isinstance(node, BinaryExpression):
-        left_type = self._expression_type(node.left)
-        right_type = self._expression_type(node.right)
-
-        if left_type == UNKNOWN or right_type == UNKNOWN:
-            return UNKNOWN
-
-        if node.operator in {"+", "-", "*", "/", "%"}:
-            if left_type == INT and right_type == INT:
+            if isinstance(node.value, int):
                 return INT
 
-            if left_type in {INT, FLOAT} and right_type in {INT, FLOAT}:
+            if isinstance(node.value, float):
                 return FLOAT
 
-            if node.operator == "+" and (
-                left_type == STRING
-                and right_type == STRING
-            ):
+            if isinstance(node.value, str):
                 return STRING
 
-            self._error(
-                f"Invalid operands for '{node.operator}': "
-                f"{left_type} and {right_type}."
-            )
-            return UNKNOWN
+            if node.value is None:
+                return UNKNOWN
 
-        if node.operator in {
-            "==",
-            "!=",
-            "<",
-            "<=",
-            ">",
-            ">=",
-        }:
-            return BOOL
+        if isinstance(node, Identifier):
+            if node.name not in self.variables:
+                self._error(
+                    f"Unknown identifier '{node.name}'."
+                )
+                return UNKNOWN
 
-    if isinstance(node, AssignmentExpression):
-        if node.target not in self.variables:
-            self._error(
-                f"Unknown identifier '{node.target}'."
-            )
-            return UNKNOWN
+            return self.variables[node.name]
 
-        return self.variables[node.target]
+        if isinstance(node, BinaryExpression):
+            left_type = self._expression_type(node.left)
+            right_type = self._expression_type(node.right)
 
-    return ANY
+            if left_type == UNKNOWN or right_type == UNKNOWN:
+                return UNKNOWN
+
+            if node.operator in {"+", "-", "*", "/", "%"}:
+                if left_type == INT and right_type == INT:
+                    return INT
+
+                if (
+                    left_type in {INT, FLOAT}
+                    and right_type in {INT, FLOAT}
+                ):
+                    return FLOAT
+
+                if (
+                    node.operator == "+"
+                    and left_type == STRING
+                    and right_type == STRING
+                ):
+                    return STRING
+
+                self._error(
+                    f"Invalid operands for '{node.operator}': "
+                    f"{left_type} and {right_type}."
+                )
+                return UNKNOWN
+
+            if node.operator in {
+                "==",
+                "!=",
+                "<",
+                "<=",
+                ">",
+                ">=",
+            }:
+                return BOOL
+
+        if isinstance(node, AssignmentExpression):
+            if node.target not in self.variables:
+                self._error(
+                    f"Unknown identifier '{node.target}'."
+                )
+                return UNKNOWN
+
+            return self.variables[node.target]
+
+        return ANY
 
     def _resolve_type(self, name: str) -> CardinalType:
         types = {
@@ -247,10 +231,13 @@ class SemanticAnalyzer:
             "Any": ANY,
         }
 
-        return types.get(name, CardinalType(
-            kind=UNKNOWN.kind,
-            name=name,
-        ))
+        return types.get(
+            name,
+            CardinalType(
+                kind=UNKNOWN.kind,
+                name=name,
+            ),
+        )
 
     def _compatible(
         self,
