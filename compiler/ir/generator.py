@@ -222,6 +222,9 @@ class IRGenerator:
         elif isinstance(node, AssignmentExpression):
             self._expression(node)
 
+        elif isinstance(node, FunctionCall):
+            self._expression(node)
+
         elif isinstance(node, IfStatement):
             self._if_statement(node)
 
