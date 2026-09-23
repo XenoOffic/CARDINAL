@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Callable, Iterable
+from typing import Callable
 
 from compiler.ir import (
     IRAgent,
@@ -13,6 +13,11 @@ from compiler.ir import (
 )
 
 from .frame import CallFrame
+from .messaging import (
+    AgentMessage,
+    MessageBus,
+)
+from .scheduler import Scheduler
 
 
 class VMError(Exception):
@@ -38,14 +43,11 @@ class AgentEvent:
 
 @dataclass
 class AgentContext:
-    """
-    Runtime context owned by an agent instance.
+    """Runtime context owned by an agent instance."""
 
-    The context contains runtime-only information such as
-    capabilities, lifecycle state and execution limits.
-    """
-
-    lifecycle: AgentLifecycle = AgentLifecycle.CREATED
+    lifecycle: AgentLifecycle = (
+        AgentLifecycle.CREATED
+    )
 
     capabilities: set[str] = field(
         default_factory=set
@@ -60,18 +62,29 @@ class AgentContext:
     events_processed: int = 0
     instructions_executed: int = 0
 
-    def grant(self, capability: str) -> None:
-        """Grant a capability to the agent."""
+    messages_sent: int = 0
+    messages_received: int = 0
+
+    def grant(
+        self,
+        capability: str,
+    ) -> None:
         if not capability:
             raise VMError(
                 "Capability name cannot be empty."
             )
 
-        self.capabilities.add(capability)
+        self.capabilities.add(
+            capability
+        )
 
-    def revoke(self, capability: str) -> None:
-        """Revoke a capability from the agent."""
-        self.capabilities.discard(capability)
+    def revoke(
+        self,
+        capability: str,
+    ) -> None:
+        self.capabilities.discard(
+            capability
+        )
 
     def has_capability(
         self,
@@ -83,7 +96,9 @@ class AgentContext:
         self,
         capability: str,
     ) -> None:
-        if not self.has_capability(capability):
+        if not self.has_capability(
+            capability
+        ):
             raise VMError(
                 f"Agent lacks capability: "
                 f"{capability}"
@@ -94,8 +109,6 @@ class AgentContext:
         event_type: str,
         behavior_name: str,
     ) -> None:
-        """Bind an event type to an agent behavior."""
-
         if not event_type:
             raise VMError(
                 "Event type cannot be empty."
@@ -106,22 +119,14 @@ class AgentContext:
                 "Behavior name cannot be empty."
             )
 
-        self.behavior_bindings[event_type] = (
-            behavior_name
-        )
+        self.behavior_bindings[
+            event_type
+        ] = behavior_name
 
     def resolve_behavior(
         self,
         event: AgentEvent,
     ) -> str | None:
-        """
-        Resolve the behavior associated with an event.
-
-        Explicit event bindings have priority. If none
-        exists, the event type itself is treated as the
-        behavior name.
-        """
-
         behavior = self.behavior_bindings.get(
             event.type
         )
@@ -134,6 +139,8 @@ class AgentContext:
     def reset_counters(self) -> None:
         self.events_processed = 0
         self.instructions_executed = 0
+        self.messages_sent = 0
+        self.messages_received = 0
 
 
 @dataclass
@@ -152,6 +159,10 @@ class AgentInstance:
 
     event_queue: list[AgentEvent] = field(
         default_factory=list
+    )
+
+    memory: dict[str, object] = field(
+        default_factory=dict
     )
 
     def __post_init__(self) -> None:
@@ -187,8 +198,6 @@ class AgentInstance:
         return self.agent.get_function(name)
 
     def start(self) -> None:
-        """Move the agent into the RUNNING state."""
-
         if (
             self.context.lifecycle
             == AgentLifecycle.STOPPED
@@ -203,8 +212,6 @@ class AgentInstance:
         )
 
     def stop(self) -> None:
-        """Stop the agent and clear pending events."""
-
         self.context.lifecycle = (
             AgentLifecycle.STOPPED
         )
@@ -215,8 +222,6 @@ class AgentInstance:
         self,
         event: AgentEvent,
     ) -> None:
-        """Queue an event for this agent."""
-
         if (
             self.context.lifecycle
             == AgentLifecycle.STOPPED
@@ -227,6 +232,37 @@ class AgentInstance:
 
         self.event_queue.append(event)
 
+    def remember(
+        self,
+        key: str,
+        value: object,
+    ) -> None:
+        if not key:
+            raise VMError(
+                "Memory key cannot be empty."
+            )
+
+        self.memory[key] = value
+
+    def recall(
+        self,
+        key: str,
+        default: object | None = None,
+    ) -> object | None:
+        return self.memory.get(
+            key,
+            default,
+        )
+
+    def forget(
+        self,
+        key: str,
+    ) -> None:
+        self.memory.pop(
+            key,
+            None,
+        )
+
 
 class VM:
     """Stack-based virtual machine for CARDINAL IR."""
@@ -236,8 +272,10 @@ class VM:
         self.return_value: object | None = None
 
         self.agents: list[AgentInstance] = []
-
         self.current_agent: AgentInstance | None = None
+
+        self.message_bus = MessageBus()
+        self.scheduler = Scheduler()
 
         self._instruction_budget: int | None = None
 
@@ -280,15 +318,21 @@ class VM:
         self,
         agent: IRAgent,
     ) -> AgentInstance:
-        """
-        Create a runtime instance of an agent.
+        instance = AgentInstance(
+            agent
+        )
 
-        Newly spawned agents start in CREATED state.
-        """
+        self.agents.append(
+            instance
+        )
 
-        instance = AgentInstance(agent)
+        self.message_bus.register(
+            instance.name
+        )
 
-        self.agents.append(instance)
+        self.scheduler.register(
+            instance.name
+        )
 
         return instance
 
@@ -297,21 +341,23 @@ class VM:
         module: IRModule,
         name: str,
     ) -> AgentInstance:
-        agent = module.get_agent(name)
+        agent = module.get_agent(
+            name
+        )
 
         if agent is None:
             raise VMError(
                 f"Unknown agent: {name}"
             )
 
-        return self.spawn_agent(agent)
+        return self.spawn_agent(
+            agent
+        )
 
     def start_agent(
         self,
         instance: AgentInstance,
     ) -> AgentInstance:
-        """Start an agent."""
-
         instance.start()
 
         return instance
@@ -320,9 +366,21 @@ class VM:
         self,
         instance: AgentInstance,
     ) -> None:
-        """Stop an agent."""
-
         instance.stop()
+
+        self.scheduler.unregister(
+            instance.name
+        )
+
+    def get_agent(
+        self,
+        name: str,
+    ) -> AgentInstance | None:
+        for agent in self.agents:
+            if agent.name == name:
+                return agent
+
+        return None
 
     # ------------------------------------------------------------------
     # Capabilities
@@ -356,6 +414,41 @@ class VM:
         )
 
     # ------------------------------------------------------------------
+    # Memory
+    # ------------------------------------------------------------------
+
+    def remember(
+        self,
+        instance: AgentInstance,
+        key: str,
+        value: object,
+    ) -> None:
+        instance.remember(
+            key,
+            value,
+        )
+
+    def recall(
+        self,
+        instance: AgentInstance,
+        key: str,
+        default: object | None = None,
+    ) -> object | None:
+        return instance.recall(
+            key,
+            default,
+        )
+
+    def forget(
+        self,
+        instance: AgentInstance,
+        key: str,
+    ) -> None:
+        instance.forget(
+            key
+        )
+
+    # ------------------------------------------------------------------
     # Event system
     # ------------------------------------------------------------------
 
@@ -365,18 +458,6 @@ class VM:
         event_type: str,
         behavior_name: str,
     ) -> None:
-        """
-        Bind an event type to a behavior.
-
-        Example:
-
-            vm.bind_behavior(
-                agent,
-                "tick",
-                "update",
-            )
-        """
-
         behavior = instance.get_behavior(
             behavior_name
         )
@@ -398,11 +479,9 @@ class VM:
         instance: AgentInstance,
         event: AgentEvent,
     ) -> None:
-        """
-        Emit an event into an agent's event queue.
-        """
-
-        instance.emit(event)
+        instance.emit(
+            event
+        )
 
     def dispatch_event(
         self,
@@ -410,10 +489,6 @@ class VM:
         event: AgentEvent,
         module: IRModule | None = None,
     ) -> object | None:
-        """
-        Observe an event, resolve its behavior and execute it.
-        """
-
         if (
             instance.context.lifecycle
             == AgentLifecycle.STOPPED
@@ -463,17 +538,12 @@ class VM:
         instance: AgentInstance,
         module: IRModule | None = None,
     ) -> object | None:
-        """
-        Process one pending event.
-
-        Returns the behavior result or None when the
-        queue is empty.
-        """
-
         if not instance.event_queue:
             return None
 
-        event = instance.event_queue.pop(0)
+        event = instance.event_queue.pop(
+            0
+        )
 
         return self.dispatch_event(
             instance,
@@ -487,13 +557,10 @@ class VM:
         module: IRModule | None = None,
         max_events: int | None = None,
     ) -> list[object | None]:
-        """
-        Process queued events until the agent becomes idle.
-
-        max_events prevents unbounded event processing.
-        """
-
-        if max_events is not None and max_events < 0:
+        if (
+            max_events is not None
+            and max_events < 0
+        ):
             raise VMError(
                 "max_events cannot be negative."
             )
@@ -521,6 +588,254 @@ class VM:
             processed += 1
 
         return results
+
+    # ------------------------------------------------------------------
+    # Agent-to-agent messaging
+    # ------------------------------------------------------------------
+
+    def send_message(
+        self,
+        sender: AgentInstance,
+        recipient: AgentInstance | str,
+        message_type: str,
+        payload: object | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> AgentMessage:
+        """
+        Send a message from one agent to another.
+
+        Messaging requires the sender to have the
+        'messaging.send' capability.
+        """
+
+        sender.context.require_capability(
+            "messaging.send"
+        )
+
+        if isinstance(
+            recipient,
+            AgentInstance,
+        ):
+            recipient_name = recipient.name
+        else:
+            recipient_name = recipient
+
+        target = self.get_agent(
+            recipient_name
+        )
+
+        if target is None:
+            raise VMError(
+                f"Unknown recipient agent: "
+                f"{recipient_name}"
+            )
+
+        message = AgentMessage(
+            sender=sender.name,
+            recipient=recipient_name,
+            type=message_type,
+            payload=payload,
+            metadata=dict(
+                metadata or {}
+            ),
+        )
+
+        self.message_bus.send(
+            message
+        )
+
+        sender.context.messages_sent += 1
+
+        return message
+
+    def receive_message(
+        self,
+        receiver: AgentInstance,
+    ) -> AgentMessage | None:
+        """
+        Receive one message for an agent.
+
+        Receiving requires 'messaging.receive'.
+        """
+
+        receiver.context.require_capability(
+            "messaging.receive"
+        )
+
+        message = self.message_bus.receive(
+            receiver.name
+        )
+
+        if message is not None:
+            receiver.context.messages_received += 1
+
+        return message
+
+    def receive_messages(
+        self,
+        receiver: AgentInstance,
+    ) -> list[AgentMessage]:
+        receiver.context.require_capability(
+            "messaging.receive"
+        )
+
+        messages = self.message_bus.receive_all(
+            receiver.name
+        )
+
+        receiver.context.messages_received += len(
+            messages
+        )
+
+        return messages
+
+    def pending_messages(
+        self,
+        instance: AgentInstance,
+    ) -> int:
+        return self.message_bus.pending(
+            instance.name
+        )
+
+    # ------------------------------------------------------------------
+    # Message -> Event bridge
+    # ------------------------------------------------------------------
+
+    def dispatch_message(
+        self,
+        receiver: AgentInstance,
+        message: AgentMessage,
+        module: IRModule | None = None,
+    ) -> object | None:
+        """
+        Convert a message into an AgentEvent and dispatch it.
+
+        The message payload and sender are preserved.
+        """
+
+        event = AgentEvent(
+            type=message.type,
+            payload=message.payload,
+            source=message.sender,
+        )
+
+        return self.dispatch_event(
+            receiver,
+            event,
+            module,
+        )
+
+    def process_next_message(
+        self,
+        receiver: AgentInstance,
+        module: IRModule | None = None,
+    ) -> object | None:
+        message = self.receive_message(
+            receiver
+        )
+
+        if message is None:
+            return None
+
+        return self.dispatch_message(
+            receiver,
+            message,
+            module,
+        )
+
+    # ------------------------------------------------------------------
+    # Scheduler
+    # ------------------------------------------------------------------
+
+    def tick(
+        self,
+        module: IRModule | None = None,
+    ) -> bool:
+        """
+        Execute one scheduler tick.
+
+        Returns True if work was processed.
+        """
+
+        self.scheduler.tick()
+
+        agent_name = (
+            self.scheduler.next_agent()
+        )
+
+        if agent_name is None:
+            return False
+
+        agent = self.get_agent(
+            agent_name
+        )
+
+        if agent is None:
+            return False
+
+        if (
+            agent.lifecycle
+            != AgentLifecycle.RUNNING
+        ):
+            return False
+
+        self.scheduler.stats.agents_scheduled += 1
+
+        if agent.event_queue:
+            self.process_next_event(
+                agent,
+                module,
+            )
+
+            self.scheduler.stats.events_processed += 1
+
+            return True
+
+        if (
+            self.message_bus.pending(
+                agent.name
+            )
+            > 0
+            and agent.context.has_capability(
+                "messaging.receive"
+            )
+        ):
+            self.process_next_message(
+                agent,
+                module,
+            )
+
+            self.scheduler.stats.messages_processed += 1
+
+            return True
+
+        return False
+
+    def run_scheduler(
+        self,
+        module: IRModule | None = None,
+        max_ticks: int = 100,
+    ) -> int:
+        """
+        Run the cooperative scheduler.
+
+        Returns the number of ticks executed.
+        """
+
+        if max_ticks < 0:
+            raise VMError(
+                "max_ticks cannot be negative."
+            )
+
+        executed = 0
+
+        for _ in range(max_ticks):
+            if not self.tick(module):
+                break
+
+            executed += 1
+
+        return executed
 
     # ------------------------------------------------------------------
     # Behavior execution
@@ -832,7 +1147,7 @@ class VM:
                     instruction,
                     module,
                     frame,
-                  )
+                )
 
                 if result is not None:
                     stack.append(result)
@@ -999,11 +1314,6 @@ class VM:
         else:
             arguments = (
                 caller_frame.operand_stack[
-                    -argument_count:
-                ]
-            )
-
-            del caller_frame.operand_stack[
                 -argument_count:
             ]
 
@@ -1050,12 +1360,6 @@ class VM:
     # ------------------------------------------------------------------
 
     def _consume_instruction_budget(self) -> None:
-        """
-        Consume one instruction from the active agent budget.
-
-        None means unlimited.
-        """
-
         if self.current_agent is None:
             return
 
