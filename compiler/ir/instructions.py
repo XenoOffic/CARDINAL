@@ -33,6 +33,7 @@ class OpCode(Enum):
     OR = auto()
 
     CALL = auto()
+    CALL_AGENT = auto()
     RETURN = auto()
 
     JUMP = auto()
