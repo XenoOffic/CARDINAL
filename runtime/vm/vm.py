@@ -24,7 +24,10 @@ class VM:
         self.frames.clear()
         self.return_value = None
 
-        frame = CallFrame(function_name=function.name)
+        frame = CallFrame(
+            function_name=function.name
+        )
+
         self.frames.append(frame)
 
         result = self._execute_function(
@@ -65,12 +68,14 @@ class VM:
                         "LOAD requires a variable name"
                     )
 
-                if name not in frame.locals:
+                try:
+                    value = frame.lookup(name)
+                except KeyError as exc:
                     raise VMError(
                         f"Undefined variable: {name}"
-                    )
+                    ) from exc
 
-                stack.append(frame.locals[name])
+                stack.append(value)
 
             elif opcode == OpCode.STORE:
                 if not stack:
@@ -85,7 +90,10 @@ class VM:
                         "STORE requires a variable name"
                     )
 
-                frame.locals[name] = stack.pop()
+                frame.declare(
+                    name,
+                    stack.pop(),
+                )
 
             elif opcode == OpCode.ASSIGN:
                 if not stack:
@@ -100,7 +108,25 @@ class VM:
                         "ASSIGN requires a variable name"
                     )
 
-                frame.locals[name] = stack.pop()
+                value = stack.pop()
+
+                try:
+                    frame.assign(name, value)
+                except KeyError as exc:
+                    raise VMError(
+                        f"Undefined variable: {name}"
+                    ) from exc
+
+            elif opcode == OpCode.ENTER_SCOPE:
+                frame.enter_scope()
+
+            elif opcode == OpCode.EXIT_SCOPE:
+                try:
+                    frame.exit_scope()
+                except RuntimeError as exc:
+                    raise VMError(
+                        str(exc)
+                    ) from exc
 
             elif opcode == OpCode.ADD:
                 self._binary(
@@ -295,7 +321,9 @@ class VM:
                 f"Unknown function: {function_name}"
             )
 
-        argument_count = len(target.parameters)
+        argument_count = len(
+            target.parameters
+        )
 
         if (
             len(caller_frame.operand_stack)
