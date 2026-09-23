@@ -1290,7 +1290,7 @@ class VM:
 
         return result
 
-            def _invoke_function(
+    def _invoke_function(
         self,
         target: IRFunction,
         module: IRModule | None,
