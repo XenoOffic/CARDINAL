@@ -4,6 +4,13 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from sandbox.bridge import (
+    SandboxBridge,
+    SandboxBridgeResult,
+    SandboxExecution,
+    SandboxLimits,
+)
+
 
 class ExperimentStatus(str, Enum):
     """Lifecycle state of an experiment."""
@@ -109,13 +116,27 @@ class ExperimentResult:
     details: str = ""
 
 
+@dataclass(frozen=True)
+class SandboxExperimentReport:
+    """Result of running an experiment through the sandbox."""
+
+    experiment_id: str
+    candidate_id: str
+    sandbox_status: str
+    success: bool
+    message: str
+    results: tuple[ExperimentResult, ...]
+
+
 @dataclass
 class Experiment:
     """
     Controlled experiment definition.
 
-    An Experiment is descriptive state only. It does not execute
-    code or modify the runtime by itself.
+    An Experiment records hypotheses, candidates, sandbox results,
+    and verification state.
+
+    It does not modify source code by itself.
     """
 
     identifier: str
@@ -174,7 +195,7 @@ class Experiment:
         """
         Verify the experiment from its recorded results.
 
-        Every declared criterion must have a passing result.
+        Every recorded result must pass.
         """
 
         if self.status != ExperimentStatus.RUNNING:
@@ -250,8 +271,10 @@ class ExperimentEngine:
     """
     Controlled experiment manager.
 
-    The engine manages experiment lifecycle and verification.
-    It does not execute arbitrary code and does not modify source.
+    The engine manages experiment lifecycle, sandbox execution,
+    and verification.
+
+    It never modifies source code automatically.
     """
 
     def __init__(self) -> None:
@@ -311,6 +334,168 @@ class ExperimentEngine:
 
         return experiment
 
+    def run_in_sandbox(
+        self,
+        identifier: str,
+        bridge: SandboxBridge,
+        limits: SandboxLimits,
+        execution: SandboxExecution,
+    ) -> SandboxExperimentReport:
+        """
+        Run a controlled experiment through the Rust sandbox.
+
+        The Rust sandbox returns measured execution information.
+        Each declared verification criterion is converted into
+        an ExperimentResult.
+
+        This method does not modify source code.
+        """
+
+        experiment = self.get(
+            identifier
+        )
+
+        if experiment.status == (
+            ExperimentStatus.PROPOSED
+        ):
+            experiment.start()
+
+        if experiment.status != (
+            ExperimentStatus.RUNNING
+        ):
+            raise RuntimeError(
+                "Only running experiments can execute "
+                "in the sandbox."
+            )
+
+        sandbox_result = bridge.execute(
+            experiment_id=experiment.identifier,
+            candidate_id=(
+                experiment.candidate.identifier
+            ),
+            limits=limits,
+            execution=execution,
+        )
+
+        self._record_sandbox_results(
+            experiment,
+            sandbox_result,
+        )
+
+        if experiment.results:
+            experiment.verify()
+
+        return SandboxExperimentReport(
+            experiment_id=(
+                experiment.identifier
+            ),
+            candidate_id=(
+                experiment.candidate.identifier
+            ),
+            sandbox_status=(
+                sandbox_result.status
+            ),
+            success=sandbox_result.success,
+            message=sandbox_result.message,
+            results=tuple(
+                experiment.results
+            ),
+        )
+
+    def _record_sandbox_results(
+        self,
+        experiment: Experiment,
+        sandbox_result: SandboxBridgeResult,
+    ) -> None:
+        """
+        Convert sandbox measurements into verification results.
+        """
+
+        values: dict[str, Any] = {
+            "success": sandbox_result.success,
+            "status": sandbox_result.status,
+            "instructions_used": (
+                sandbox_result.instructions_used
+            ),
+            "memory_used_bytes": (
+                sandbox_result.memory_used_bytes
+            ),
+            "execution_time_ms": (
+                sandbox_result.execution_time_ms
+            ),
+        }
+
+        for criterion in experiment.criteria:
+            if criterion.name not in values:
+                result = ExperimentResult(
+                    metric=criterion.name,
+                    actual=None,
+                    passed=False,
+                    details=(
+                        "Sandbox result does not contain "
+                        f"metric: {criterion.name}"
+                    ),
+                )
+
+                experiment.record_result(
+                    result
+                )
+
+                continue
+
+            actual = values[
+                criterion.name
+            ]
+
+            passed = self._compare(
+                actual,
+                criterion.expected,
+                criterion.operator,
+            )
+
+            result = ExperimentResult(
+                metric=criterion.name,
+                actual=actual,
+                passed=passed,
+                details=(
+                    f"expected {criterion.operator} "
+                    f"{criterion.expected!r}, "
+                    f"actual {actual!r}"
+                ),
+            )
+
+            experiment.record_result(
+                result
+            )
+
+    @staticmethod
+    def _compare(
+        actual: Any,
+        expected: Any,
+        operator: str,
+    ) -> bool:
+        if operator == "==":
+            return actual == expected
+
+        if operator == "!=":
+            return actual != expected
+
+        if operator == ">":
+            return actual > expected
+
+        if operator == ">=":
+            return actual >= expected
+
+        if operator == "<":
+            return actual < expected
+
+        if operator == "<=":
+            return actual <= expected
+
+        raise ValueError(
+            f"Unsupported operator: {operator}"
+        )
+
     def verify(
         self,
         identifier: str,
@@ -356,4 +541,4 @@ class ExperimentEngine:
             total_results=len(
                 experiment.results
             ),
-  )
+    )
