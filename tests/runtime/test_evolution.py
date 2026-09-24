@@ -47,16 +47,19 @@ class FakeBridge:
         self.success = success
         self.status = status
 
-    def run(
+    def execute(
         self,
-        execution,
-        limits,
-    ):
+        *,
+        experiment_id: str,
+        candidate_id: str,
+        limits: SandboxLimits,
+        execution: SandboxExecution,
+    ) -> FakeBridgeResult:
         return FakeBridgeResult(
             success=self.success,
             status=self.status,
-            experiment_id=execution.experiment_id,
-            candidate_id=execution.candidate_id,
+            experiment_id=experiment_id,
+            candidate_id=candidate_id,
             instructions_used=(
                 execution.instructions_used
             ),
@@ -167,8 +170,6 @@ def make_limits() -> SandboxLimits:
 
 def make_execution() -> SandboxExecution:
     return SandboxExecution(
-        experiment_id="evolution-001",
-        candidate_id="candidate-001",
         instructions_used=100,
         memory_used_bytes=1024,
         execution_time_ms=100,
