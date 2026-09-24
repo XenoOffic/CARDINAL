@@ -86,18 +86,14 @@ def make_candidate(
     return OrchestrationCandidate(
         candidate=EvolutionCandidate(
             identifier=identifier,
-            description=(
-                f"Candidate {identifier}"
-            ),
+            description=f"Candidate {identifier}",
             expected_benefit=benefit,
             risk=risk,
         ),
         experiment_id=f"experiment-{identifier}",
         experiment_candidate=ExperimentCandidate(
             identifier=f"experiment-candidate-{identifier}",
-            description=(
-                f"Experiment candidate {identifier}"
-            ),
+            description=f"Experiment candidate {identifier}",
         ),
         hypothesis=ExperimentHypothesis(
             statement=(
@@ -178,7 +174,18 @@ def test_orchestrator_evaluates_multiple_candidates() -> None:
     )
     assert report.total_candidates == 2
     assert len(report.eligible_candidates) == 1
-    assert len(report.blocked_candidates) == 1
+
+    rejected = [
+        result
+        for result in report.candidates
+        if result.evolution is None
+    ]
+
+    assert len(rejected) == 1
+    assert (
+        rejected[0].evaluation.candidate.identifier
+        == "b"
+    )
 
 
 def test_eligible_candidate_reaches_safety_gate() -> None:
@@ -307,6 +314,14 @@ def test_rejected_candidate_never_reaches_sandbox() -> None:
     assert len(report.blocked_candidates) == 0
     assert bridge.calls == 0
 
+    rejected = [
+        result
+        for result in report.candidates
+        if result.evolution is None
+    ]
+
+    assert len(rejected) == 1
+
 
 def test_empty_candidates_fail_cleanly() -> None:
     orchestrator = make_orchestrator()
@@ -375,6 +390,7 @@ def test_empty_identifier_is_rejected() -> None:
 
 def test_existing_experiment_is_reused() -> None:
     experiment_engine = ExperimentEngine()
+
     evolution_engine = EvolutionEngine(
         experiment_engine,
         SafetyGate(),
@@ -516,4 +532,4 @@ def test_orchestration_is_deterministic() -> None:
         if result.evolution is not None
         else None
         for result in second.candidates
-]
+    ]
