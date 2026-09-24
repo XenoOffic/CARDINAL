@@ -265,6 +265,110 @@ class EvolutionOrchestrator:
                     evolution=evolution_report,
                 )
             )
+    def orchestrate(
+        self,
+        *,
+        identifier: str,
+        decision: RuntimeDecision,
+        candidates: list[OrchestrationCandidate],
+        bridge: Any,
+        limits: Any,
+        execution: Any,
+        regression_passed: bool,
+        policy_passed: bool,
+    ) -> OrchestrationReport:
+        """
+        Execute one complete controlled evolution cycle.
+        """
+
+        if not identifier:
+            raise ValueError(
+                "identifier cannot be empty."
+            )
+
+        if not candidates:
+            return OrchestrationReport(
+                identifier=identifier,
+                status=OrchestrationStatus.FAILED,
+                decision=decision,
+                candidates=(),
+                reason=(
+                    "No evolution candidates were provided."
+                ),
+            )
+
+        if not decision.requires_verification:
+            return OrchestrationReport(
+                identifier=identifier,
+                status=OrchestrationStatus.FAILED,
+                decision=decision,
+                candidates=(),
+                reason=(
+                    "Evolution requires explicit "
+                    "verification."
+                ),
+            )
+
+        candidate_definitions = [
+            item.candidate
+            for item in candidates
+        ]
+
+        evaluations = self.candidate_engine.evaluate(
+            candidate_definitions
+        )
+
+        candidate_map = {
+            item.candidate.identifier: item
+            for item in candidates
+        }
+
+        results: list[CandidateOrchestrationResult] = []
+
+        for evaluation in evaluations.evaluations:
+            candidate_definition = candidate_map[
+                evaluation.candidate.identifier
+            ]
+
+            if evaluation.status.value != "eligible":
+                results.append(
+                    CandidateOrchestrationResult(
+                        evaluation=evaluation,
+                        evolution=None,
+                    )
+                )
+                continue
+
+            experiment = self._ensure_experiment(
+                candidate_definition
+            )
+
+            request = EvolutionRequest(
+                identifier=(
+                    f"{identifier}:"
+                    f"{evaluation.candidate.identifier}"
+                ),
+                decision=decision,
+                experiment_id=experiment.identifier,
+                regression_passed=regression_passed,
+                policy_passed=policy_passed,
+            )
+
+            evolution_report = (
+                self.evolution_engine.evolve(
+                    request,
+                    bridge=bridge,
+                    limits=limits,
+                    execution=execution,
+                )
+            )
+
+            results.append(
+                CandidateOrchestrationResult(
+                    evaluation=evaluation,
+                    evolution=evolution_report,
+                )
+            )
 
         approved = any(
             result.evolution is not None
