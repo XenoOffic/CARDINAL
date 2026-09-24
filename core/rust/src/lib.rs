@@ -142,6 +142,7 @@ mod tests {
             .unwrap();
 
         runtime.start().unwrap();
+
         runtime
             .start_agent("agent_a")
             .unwrap();
@@ -163,6 +164,7 @@ mod tests {
             .unwrap();
 
         runtime.start().unwrap();
+
         runtime
             .start_agent("agent_a")
             .unwrap();
@@ -211,7 +213,114 @@ mod tests {
         assert!(!handle.is_null());
 
         unsafe {
-            ffi::cardinal_runtime_destroy(handle);
+            ffi::cardinal_runtime_destroy(
+                handle
+            );
+        }
+    }
+
+    #[test]
+    fn ffi_start_works() {
+        let handle =
+            ffi::cardinal_runtime_create();
+
+        assert!(!handle.is_null());
+
+        let result = unsafe {
+            ffi::cardinal_runtime_start(
+                handle
+            )
+        };
+
+        assert!(result.success);
+        assert_eq!(result.code, 0);
+        assert!(!result.message.is_null());
+
+        unsafe {
+            ffi::cardinal_result_free(
+                result.message
+            );
+
+            ffi::cardinal_runtime_destroy(
+                handle
+            );
+        }
+    }
+
+    #[test]
+    fn ffi_register_agent_works() {
+        use std::ffi::CString;
+
+        let handle =
+            ffi::cardinal_runtime_create();
+
+        assert!(!handle.is_null());
+
+        let name =
+            CString::new("agent_a")
+                .unwrap();
+
+        let result = unsafe {
+            ffi::cardinal_runtime_register_agent(
+                handle,
+                name.as_ptr(),
+            )
+        };
+
+        assert!(result.success);
+
+        unsafe {
+            ffi::cardinal_result_free(
+                result.message
+            );
+
+            ffi::cardinal_runtime_destroy(
+                handle
+            );
+        }
+    }
+
+    #[test]
+    fn ffi_null_handle_is_rejected() {
+        let result = unsafe {
+            ffi::cardinal_runtime_start(
+                std::ptr::null_mut()
+            )
+        };
+
+        assert!(!result.success);
+        assert_eq!(result.code, 1);
+
+        unsafe {
+            ffi::cardinal_result_free(
+                result.message
+            );
+        }
+    }
+
+    #[test]
+    fn ffi_null_agent_name_is_rejected() {
+        let handle =
+            ffi::cardinal_runtime_create();
+
+        let result = unsafe {
+            ffi::cardinal_runtime_register_agent(
+                handle,
+                std::ptr::null(),
+            )
+        };
+
+        assert!(!result.success);
+        assert_eq!(result.code, 3);
+
+        unsafe {
+            ffi::cardinal_result_free(
+                result.message
+            );
+
+            ffi::cardinal_runtime_destroy(
+                handle
+            );
         }
     }
 }
