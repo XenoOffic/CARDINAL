@@ -4,7 +4,11 @@ pub mod ids;
 pub mod runtime;
 
 pub use error::CoreError;
-pub use ids::{AgentId, BehaviorId, ExperimentId};
+pub use ids::{
+    AgentId,
+    BehaviorId,
+    ExperimentId,
+};
 pub use runtime::{
     Agent,
     AgentState,
@@ -17,9 +21,24 @@ pub use runtime::{
 mod tests {
     use super::*;
 
+    fn agent(name: &str) -> Agent {
+        Agent::new(
+            AgentId::new(name).unwrap()
+        )
+    }
+
+    fn agent_id(name: &str) -> AgentId {
+        AgentId::new(name).unwrap()
+    }
+
+    fn behavior_id(name: &str) -> BehaviorId {
+        BehaviorId::new(name).unwrap()
+    }
+
     #[test]
     fn runtime_starts() {
-        let mut runtime = CardinalRuntime::new();
+        let mut runtime =
+            CardinalRuntime::new();
 
         assert_eq!(
             runtime.state(),
@@ -36,7 +55,8 @@ mod tests {
 
     #[test]
     fn runtime_can_pause() {
-        let mut runtime = CardinalRuntime::new();
+        let mut runtime =
+            CardinalRuntime::new();
 
         runtime.start().unwrap();
         runtime.pause().unwrap();
@@ -49,7 +69,8 @@ mod tests {
 
     #[test]
     fn runtime_can_stop() {
-        let mut runtime = CardinalRuntime::new();
+        let mut runtime =
+            CardinalRuntime::new();
 
         runtime.start().unwrap();
         runtime.stop().unwrap();
@@ -62,10 +83,11 @@ mod tests {
 
     #[test]
     fn agent_can_be_registered() {
-        let mut runtime = CardinalRuntime::new();
+        let mut runtime =
+            CardinalRuntime::new();
 
         runtime
-            .register_agent("agent_a")
+            .register_agent(agent("agent_a"))
             .unwrap();
 
         assert_eq!(
@@ -76,101 +98,122 @@ mod tests {
 
     #[test]
     fn duplicate_agent_is_rejected() {
-        let mut runtime = CardinalRuntime::new();
+        let mut runtime =
+            CardinalRuntime::new();
 
         runtime
-            .register_agent("agent_a")
+            .register_agent(agent("agent_a"))
             .unwrap();
 
         assert!(
             runtime
-                .register_agent("agent_a")
+                .register_agent(agent("agent_a"))
                 .is_err()
         );
     }
 
     #[test]
     fn agent_can_register_behavior() {
-        let mut runtime = CardinalRuntime::new();
+        let mut runtime =
+            CardinalRuntime::new();
 
         runtime
-            .register_agent("agent_a")
+            .register_agent(agent("agent_a"))
             .unwrap();
 
-        let agent = runtime
-            .get_agent_mut("agent_a")
-            .unwrap();
+        let id =
+            agent_id("agent_a");
+
+        let agent =
+            runtime.get_agent_mut(&id).unwrap();
 
         agent
-            .register_behavior("tick")
+            .register_behavior(
+                behavior_id("tick")
+            )
             .unwrap();
 
         assert!(
-            agent.has_behavior("tick")
+            agent.has_behavior(
+                &behavior_id("tick")
+            )
         );
     }
 
     #[test]
     fn duplicate_behavior_is_rejected() {
-        let mut runtime = CardinalRuntime::new();
+        let mut runtime =
+            CardinalRuntime::new();
 
         runtime
-            .register_agent("agent_a")
+            .register_agent(agent("agent_a"))
             .unwrap();
 
-        let agent = runtime
-            .get_agent_mut("agent_a")
-            .unwrap();
+        let id =
+            agent_id("agent_a");
+
+        let agent =
+            runtime.get_agent_mut(&id).unwrap();
 
         agent
-            .register_behavior("tick")
+            .register_behavior(
+                behavior_id("tick")
+            )
             .unwrap();
 
         assert!(
             agent
-                .register_behavior("tick")
+                .register_behavior(
+                    behavior_id("tick")
+                )
                 .is_err()
         );
     }
 
     #[test]
     fn running_agent_is_counted() {
-        let mut runtime = CardinalRuntime::new();
+        let mut runtime =
+            CardinalRuntime::new();
 
         runtime
-            .register_agent("agent_a")
+            .register_agent(agent("agent_a"))
             .unwrap();
 
         runtime.start().unwrap();
 
+        let id =
+            agent_id("agent_a");
+
         runtime
-            .start_agent("agent_a")
+            .start_agent(&id)
             .unwrap();
 
-        let snapshot = runtime.snapshot();
-
         assert_eq!(
-            snapshot.running_agents,
+            runtime.snapshot().running_agents,
             1
         );
     }
 
     #[test]
     fn stopping_agent_removes_it_from_running_count() {
-        let mut runtime = CardinalRuntime::new();
+        let mut runtime =
+            CardinalRuntime::new();
 
         runtime
-            .register_agent("agent_a")
+            .register_agent(agent("agent_a"))
             .unwrap();
 
         runtime.start().unwrap();
 
+        let id =
+            agent_id("agent_a");
+
         runtime
-            .start_agent("agent_a")
+            .start_agent(&id)
             .unwrap();
 
         runtime
-            .stop_agent("agent_a")
+            .stop_agent(&id)
             .unwrap();
 
         assert_eq!(
@@ -181,22 +224,29 @@ mod tests {
 
     #[test]
     fn behavior_count_is_reported() {
-        let mut runtime = CardinalRuntime::new();
+        let mut runtime =
+            CardinalRuntime::new();
 
         runtime
-            .register_agent("agent_a")
+            .register_agent(agent("agent_a"))
             .unwrap();
 
-        let agent = runtime
-            .get_agent_mut("agent_a")
+        let id =
+            agent_id("agent_a");
+
+        let agent =
+            runtime.get_agent_mut(&id).unwrap();
+
+        agent
+            .register_behavior(
+                behavior_id("tick")
+            )
             .unwrap();
 
         agent
-            .register_behavior("tick")
-            .unwrap();
-
-        agent
-            .register_behavior("update")
+            .register_behavior(
+                behavior_id("update")
+            )
             .unwrap();
 
         assert_eq!(
@@ -234,7 +284,9 @@ mod tests {
 
         assert!(result.success);
         assert_eq!(result.code, 0);
-        assert!(!result.message.is_null());
+        assert!(
+            !result.message.is_null()
+        );
 
         unsafe {
             ffi::cardinal_result_free(
