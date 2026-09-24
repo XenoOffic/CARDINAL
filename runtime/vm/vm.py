@@ -13,6 +13,7 @@ from compiler.ir import (
 )
 
 from .frame import CallFrame
+from .intelligence import RuntimeIntelligence
 from .messaging import (
     AgentMessage,
     MessageBus,
@@ -46,9 +47,7 @@ class AgentEvent:
 class AgentContext:
     """Runtime context owned by an agent instance."""
 
-    lifecycle: AgentLifecycle = (
-        AgentLifecycle.CREATED
-    )
+    lifecycle: AgentLifecycle = AgentLifecycle.CREATED
 
     capabilities: set[str] = field(
         default_factory=set
@@ -82,17 +81,13 @@ class AgentContext:
                 "Capability name cannot be empty."
             )
 
-        self.capabilities.add(
-            capability
-        )
+        self.capabilities.add(capability)
 
     def revoke(
         self,
         capability: str,
     ) -> None:
-        self.capabilities.discard(
-            capability
-        )
+        self.capabilities.discard(capability)
 
     def has_capability(
         self,
@@ -104,12 +99,9 @@ class AgentContext:
         self,
         capability: str,
     ) -> None:
-        if not self.has_capability(
-            capability
-        ):
+        if not self.has_capability(capability):
             raise VMError(
-                f"Agent lacks capability: "
-                f"{capability}"
+                f"Agent lacks capability: {capability}"
             )
 
     def bind_event(
@@ -127,9 +119,9 @@ class AgentContext:
                 "Behavior name cannot be empty."
             )
 
-        self.behavior_bindings[
-            event_type
-        ] = behavior_name
+        self.behavior_bindings[event_type] = (
+            behavior_name
+        )
 
     def resolve_behavior(
         self,
@@ -218,8 +210,7 @@ class AgentInstance:
             == AgentLifecycle.STOPPED
         ):
             raise VMError(
-                f"Agent '{self.name}' "
-                "cannot be restarted."
+                f"Agent '{self.name}' cannot be restarted."
             )
 
         self.context.lifecycle = (
@@ -294,6 +285,10 @@ class VM:
 
         self.observability = RuntimeHistory()
 
+        self.intelligence = RuntimeIntelligence(
+            self.observability
+        )
+
         self._instruction_budget: int | None = None
         self._execution_instruction_count: int = 0
 
@@ -321,6 +316,45 @@ class VM:
             source=source,
             metadata=metadata,
         )
+
+    # ------------------------------------------------------------------
+    # Runtime Intelligence
+    # ------------------------------------------------------------------
+
+    def runtime_snapshot(self):
+        """Return a snapshot of current runtime activity."""
+        return self.intelligence.snapshot()
+
+    def agent_statistics(
+        self,
+        agent_name: str,
+    ):
+        """Return intelligence statistics for an agent."""
+        return self.intelligence.agent_statistics(
+            agent_name
+        )
+
+    def behavior_statistics(
+        self,
+        behavior_name: str,
+    ):
+        """Return intelligence statistics for a behavior."""
+        return self.intelligence.behavior_statistics(
+            behavior_name
+        )
+
+    def recent_errors(
+        self,
+        limit: int = 10,
+    ):
+        """Return recent runtime errors."""
+        return self.intelligence.recent_errors(
+            limit
+        )
+
+    def detect_runtime_patterns(self):
+        """Detect deterministic runtime patterns."""
+        return self.intelligence.detect_patterns()
 
     # ------------------------------------------------------------------
     # Core execution
@@ -376,13 +410,9 @@ class VM:
         self,
         agent: IRAgent,
     ) -> AgentInstance:
-        instance = AgentInstance(
-            agent
-        )
+        instance = AgentInstance(agent)
 
-        self.agents.append(
-            instance
-        )
+        self.agents.append(instance)
 
         self.message_bus.register(
             instance.name
@@ -396,9 +426,7 @@ class VM:
             "agent.spawned",
             agent=instance,
             metadata={
-                "lifecycle": (
-                    instance.lifecycle.name
-                ),
+                "lifecycle": instance.lifecycle.name
             },
         )
 
@@ -409,18 +437,14 @@ class VM:
         module: IRModule,
         name: str,
     ) -> AgentInstance:
-        agent = module.get_agent(
-            name
-        )
+        agent = module.get_agent(name)
 
         if agent is None:
             raise VMError(
                 f"Unknown agent: {name}"
             )
 
-        return self.spawn_agent(
-            agent
-        )
+        return self.spawn_agent(agent)
 
     def start_agent(
         self,
@@ -432,9 +456,7 @@ class VM:
             "agent.started",
             agent=instance,
             metadata={
-                "lifecycle": (
-                    instance.lifecycle.name
-                ),
+                "lifecycle": instance.lifecycle.name
             },
         )
 
@@ -454,9 +476,7 @@ class VM:
             "agent.stopped",
             agent=instance,
             metadata={
-                "lifecycle": (
-                    instance.lifecycle.name
-                ),
+                "lifecycle": instance.lifecycle.name
             },
         )
 
@@ -479,18 +499,14 @@ class VM:
         instance: AgentInstance,
         capability: str,
     ) -> None:
-        instance.context.grant(
-            capability
-        )
+        instance.context.grant(capability)
 
     def revoke_capability(
         self,
         instance: AgentInstance,
         capability: str,
     ) -> None:
-        instance.context.revoke(
-            capability
-        )
+        instance.context.revoke(capability)
 
     def require_capability(
         self,
@@ -511,10 +527,7 @@ class VM:
         key: str,
         value: object,
     ) -> None:
-        instance.remember(
-            key,
-            value,
-        )
+        instance.remember(key, value)
 
     def recall(
         self,
@@ -532,9 +545,7 @@ class VM:
         instance: AgentInstance,
         key: str,
     ) -> None:
-        instance.forget(
-            key
-        )
+        instance.forget(key)
 
     # ------------------------------------------------------------------
     # Event system
@@ -567,9 +578,7 @@ class VM:
         instance: AgentInstance,
         event: AgentEvent,
     ) -> None:
-        instance.emit(
-            event
-        )
+        instance.emit(event)
 
     def dispatch_event(
         self,
@@ -592,9 +601,7 @@ class VM:
             self.start_agent(instance)
 
         behavior_name = (
-            instance.context.resolve_behavior(
-                event
-            )
+            instance.context.resolve_behavior(event)
         )
 
         if behavior_name is None:
@@ -632,7 +639,7 @@ class VM:
                 behavior=behavior_name,
                 source=event.source,
                 metadata={
-                    "event_type": event.type,
+                    "event_type": event.type
                 },
             )
 
@@ -651,9 +658,7 @@ class VM:
         if not instance.event_queue:
             return None
 
-        event = instance.event_queue.pop(
-            0
-        )
+        event = instance.event_queue.pop(0)
 
         return self.dispatch_event(
             instance,
@@ -676,7 +681,6 @@ class VM:
             )
 
         results: list[object | None] = []
-
         processed = 0
 
         while instance.event_queue:
@@ -738,14 +742,10 @@ class VM:
             recipient=recipient_name,
             type=message_type,
             payload=payload,
-            metadata=dict(
-                metadata or {}
-            ),
+            metadata=dict(metadata or {}),
         )
 
-        self.message_bus.send(
-            message
-        )
+        self.message_bus.send(message)
 
         sender.context.messages_sent += 1
 
@@ -845,9 +845,7 @@ class VM:
             receiver.context.current_message
         )
 
-        receiver.context.current_message = (
-            message
-        )
+        receiver.context.current_message = message
 
         try:
             return self.dispatch_event(
@@ -865,9 +863,7 @@ class VM:
         receiver: AgentInstance,
         module: IRModule | None = None,
     ) -> object | None:
-        message = self.receive_message(
-            receiver
-        )
+        message = self.receive_message(receiver)
 
         if message is None:
             return None
@@ -891,9 +887,7 @@ class VM:
         def has_work(
             agent_name: str,
         ) -> bool:
-            agent = self.get_agent(
-                agent_name
-            )
+            agent = self.get_agent(agent_name)
 
             if agent is None:
                 return False
@@ -910,8 +904,7 @@ class VM:
             if (
                 self.message_bus.pending(
                     agent.name
-                )
-                > 0
+                ) > 0
                 and agent.context.has_capability(
                     "messaging.receive"
                 )
@@ -920,18 +913,14 @@ class VM:
 
             return False
 
-        agent_name = (
-            self.scheduler.next_agent(
-                has_work
-            )
+        agent_name = self.scheduler.next_agent(
+            has_work
         )
 
         if agent_name is None:
             return False
 
-        agent = self.get_agent(
-            agent_name
-        )
+        agent = self.get_agent(agent_name)
 
         if agent is None:
             return False
@@ -957,8 +946,7 @@ class VM:
         if (
             self.message_bus.pending(
                 agent.name
-            )
-            > 0
+            ) > 0
             and agent.context.has_capability(
                 "messaging.receive"
             )
@@ -1062,12 +1050,9 @@ class VM:
 
         frame = CallFrame(
             function_name=(
-                f"{instance.name}."
-                f"{behavior_name}"
+                f"{instance.name}.{behavior_name}"
             ),
-            locals=dict(
-                instance.state
-            ),
+            locals=dict(instance.state),
         )
 
         self.frames.append(frame)
@@ -1096,16 +1081,14 @@ class VM:
                         type(result).__name__
                         if result is not None
                         else "None"
-                    ),
+                    )
                 },
             )
 
             return result
 
         except Exception as exc:
-            instance.context.last_error = str(
-                exc
-            )
+            instance.context.last_error = str(exc)
 
             self._record_runtime_event(
                 "runtime.error",
@@ -1187,9 +1170,7 @@ class VM:
             stack = frame.operand_stack
 
             if opcode == OpCode.CONSTANT:
-                stack.append(
-                    instruction.operand
-                )
+                stack.append(instruction.operand)
 
             elif opcode == OpCode.LOAD:
                 name = instruction.operand
@@ -1388,8 +1369,7 @@ class VM:
             elif opcode == OpCode.JUMP_IF_FALSE:
                 if not stack:
                     raise VMError(
-                        "Stack underflow during "
-                        "JUMP_IF_FALSE"
+                        "Stack underflow during JUMP_IF_FALSE"
                     )
 
                 condition = stack.pop()
@@ -1422,8 +1402,7 @@ class VM:
 
             else:
                 raise VMError(
-                    f"Unsupported opcode: "
-                    f"{opcode.name}"
+                    f"Unsupported opcode: {opcode.name}"
                 )
 
             frame.instruction_pointer += 1
@@ -1461,8 +1440,7 @@ class VM:
 
         if target is None:
             raise VMError(
-                f"Unknown function: "
-                f"{function_name}"
+                f"Unknown function: {function_name}"
             )
 
         return self._invoke_function(
@@ -1577,9 +1555,9 @@ class VM:
         if self.current_agent is not None:
             for name in self.current_agent.state:
                 if name in frame.locals:
-                    self.current_agent.state[
-                        name
-                    ] = frame.locals[name]
+                    self.current_agent.state[name] = (
+                        frame.locals[name]
+                    )
 
         if self.frames and self.frames[-1] is frame:
             self.frames.pop()
@@ -1602,10 +1580,7 @@ class VM:
         if limit is None:
             return
 
-        if (
-            self._execution_instruction_count
-            > limit
-        ):
+        if self._execution_instruction_count > limit:
             raise VMError(
                 f"Instruction limit exceeded "
                 f"for agent '{self.current_agent.name}'."
@@ -1618,14 +1593,16 @@ class VM:
     def _binary(
         self,
         frame: CallFrame,
-        operation: Callable[[object, object], object],
+        operation: Callable[
+            [object, object],
+            object,
+        ],
     ) -> None:
         stack = frame.operand_stack
 
         if len(stack) < 2:
             raise VMError(
-                "Stack underflow during "
-                "binary operation"
+                "Stack underflow during binary operation"
             )
 
         right = stack.pop()
