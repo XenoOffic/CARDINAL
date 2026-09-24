@@ -1,7 +1,11 @@
 use std::ffi::{c_char, CStr, CString};
 use std::ptr;
 
-use crate::runtime::CardinalRuntime;
+use crate::ids::AgentId;
+use crate::runtime::{
+    Agent,
+    CardinalRuntime,
+};
 
 #[repr(C)]
 pub struct CardinalRuntimeHandle {
@@ -28,7 +32,10 @@ impl CardinalResult {
         }
     }
 
-    fn error(code: i32, message: &str) -> Self {
+    fn error(
+        code: i32,
+        message: &str,
+    ) -> Self {
         Self {
             success: false,
             code,
@@ -43,12 +50,14 @@ impl CardinalResult {
 
 fn read_c_string(
     value: *const c_char,
-) -> Result<&'static str, CardinalResult> {
+) -> Result<String, CardinalResult> {
     if value.is_null() {
-        return Err(CardinalResult::error(
-            3,
-            "string pointer is null",
-        ));
+        return Err(
+            CardinalResult::error(
+                3,
+                "string pointer is null",
+            )
+        );
     }
 
     let c_string = unsafe {
@@ -56,22 +65,8 @@ fn read_c_string(
     };
 
     match c_string.to_str() {
-        Ok(value) => {
-            /*
-             * The returned reference is only used during
-             * the current FFI call.
-             *
-             * The lifetime is intentionally hidden behind
-             * this helper because the C string is owned by
-             * the caller.
-             */
-            Ok(unsafe {
-                std::mem::transmute::<
-                    &str,
-                    &'static str,
-                >(value)
-            })
-        }
+        Ok(value) => Ok(value.to_string()),
+
         Err(_) => Err(
             CardinalResult::error(
                 4,
@@ -84,11 +79,15 @@ fn read_c_string(
 #[no_mangle]
 pub extern "C" fn cardinal_runtime_create(
 ) -> *mut CardinalRuntimeHandle {
-    let handle = CardinalRuntimeHandle {
-        runtime: CardinalRuntime::new(),
-    };
+    let handle =
+        CardinalRuntimeHandle {
+            runtime:
+                CardinalRuntime::new(),
+        };
 
-    Box::into_raw(Box::new(handle))
+    Box::into_raw(
+        Box::new(handle)
+    )
 }
 
 #[no_mangle]
@@ -99,7 +98,9 @@ pub unsafe extern "C" fn cardinal_runtime_destroy(
         return;
     }
 
-    drop(Box::from_raw(handle));
+    drop(
+        Box::from_raw(handle)
+    );
 }
 
 #[no_mangle]
@@ -113,12 +114,13 @@ pub unsafe extern "C" fn cardinal_runtime_start(
         );
     }
 
-    let runtime = &mut (*handle).runtime;
+    let runtime =
+        &mut (*handle).runtime;
 
     match runtime.start() {
         Ok(()) => {
             CardinalResult::success(
-                "runtime started",
+                "runtime started"
             )
         }
 
@@ -142,12 +144,13 @@ pub unsafe extern "C" fn cardinal_runtime_pause(
         );
     }
 
-    let runtime = &mut (*handle).runtime;
+    let runtime =
+        &mut (*handle).runtime;
 
     match runtime.pause() {
         Ok(()) => {
             CardinalResult::success(
-                "runtime paused",
+                "runtime paused"
             )
         }
 
@@ -171,12 +174,13 @@ pub unsafe extern "C" fn cardinal_runtime_stop(
         );
     }
 
-    let runtime = &mut (*handle).runtime;
+    let runtime =
+        &mut (*handle).runtime;
 
     match runtime.stop() {
         Ok(()) => {
             CardinalResult::success(
-                "runtime stopped",
+                "runtime stopped"
             )
         }
 
@@ -201,10 +205,13 @@ pub unsafe extern "C" fn cardinal_runtime_register_agent(
         );
     }
 
-    let name = match read_c_string(name) {
-        Ok(value) => value,
-        Err(result) => return result,
-    };
+    let name =
+        match read_c_string(name) {
+            Ok(value) => value,
+            Err(result) => {
+                return result;
+            }
+        };
 
     if name.is_empty() {
         return CardinalResult::error(
@@ -213,12 +220,27 @@ pub unsafe extern "C" fn cardinal_runtime_register_agent(
         );
     }
 
-    let runtime = &mut (*handle).runtime;
+    let agent_id =
+        match AgentId::new(&name) {
+            Ok(id) => id,
+            Err(_) => {
+                return CardinalResult::error(
+                    5,
+                    "invalid agent identifier",
+                );
+            }
+        };
 
-    match runtime.register_agent(name) {
+    let agent =
+        Agent::new(agent_id);
+
+    let runtime =
+        &mut (*handle).runtime;
+
+    match runtime.register_agent(agent) {
         Ok(()) => {
             CardinalResult::success(
-                "agent registered",
+                "agent registered"
             )
         }
 
@@ -243,10 +265,13 @@ pub unsafe extern "C" fn cardinal_runtime_start_agent(
         );
     }
 
-    let name = match read_c_string(name) {
-        Ok(value) => value,
-        Err(result) => return result,
-    };
+    let name =
+        match read_c_string(name) {
+            Ok(value) => value,
+            Err(result) => {
+                return result;
+            }
+        };
 
     if name.is_empty() {
         return CardinalResult::error(
@@ -255,12 +280,26 @@ pub unsafe extern "C" fn cardinal_runtime_start_agent(
         );
     }
 
-    let runtime = &mut (*handle).runtime;
+    let agent_id =
+        match AgentId::new(&name) {
+            Ok(id) => id,
+            Err(_) => {
+                return CardinalResult::error(
+                    5,
+                    "invalid agent identifier",
+                );
+            }
+        };
 
-    match runtime.start_agent(name) {
+    let runtime =
+        &mut (*handle).runtime;
+
+    match runtime.start_agent(
+        &agent_id
+    ) {
         Ok(()) => {
             CardinalResult::success(
-                "agent started",
+                "agent started"
             )
         }
 
@@ -285,10 +324,13 @@ pub unsafe extern "C" fn cardinal_runtime_stop_agent(
         );
     }
 
-    let name = match read_c_string(name) {
-        Ok(value) => value,
-        Err(result) => return result,
-    };
+    let name =
+        match read_c_string(name) {
+            Ok(value) => value,
+            Err(result) => {
+                return result;
+            }
+        };
 
     if name.is_empty() {
         return CardinalResult::error(
@@ -297,12 +339,26 @@ pub unsafe extern "C" fn cardinal_runtime_stop_agent(
         );
     }
 
-    let runtime = &mut (*handle).runtime;
+    let agent_id =
+        match AgentId::new(&name) {
+            Ok(id) => id,
+            Err(_) => {
+                return CardinalResult::error(
+                    5,
+                    "invalid agent identifier",
+                );
+            }
+        };
 
-    match runtime.stop_agent(name) {
+    let runtime =
+        &mut (*handle).runtime;
+
+    match runtime.stop_agent(
+        &agent_id
+    ) {
         Ok(()) => {
             CardinalResult::success(
-                "agent stopped",
+                "agent stopped"
             )
         }
 
@@ -323,7 +379,9 @@ pub unsafe extern "C" fn cardinal_result_free(
         return;
     }
 
-    drop(CString::from_raw(message));
+    drop(
+        CString::from_raw(message)
+    );
 }
 
 #[no_mangle]
