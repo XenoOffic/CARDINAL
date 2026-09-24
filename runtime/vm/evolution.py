@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from .decision import (
     DecisionAction,
@@ -112,9 +113,9 @@ class EvolutionEngine:
         self,
         request: EvolutionRequest,
         *,
-        bridge,
-        limits,
-        execution,
+        bridge: Any,
+        limits: Any,
+        execution: Any,
     ) -> EvolutionReport:
         """
         Execute one controlled evolution evaluation.
@@ -150,9 +151,22 @@ class EvolutionEngine:
                 ),
             )
 
-        experiment = self.experiment_engine.get(
-            request.experiment_id
-        )
+        try:
+            experiment = self.experiment_engine.get(
+                request.experiment_id
+            )
+        except KeyError:
+            return EvolutionReport(
+                identifier=request.identifier,
+                status=EvolutionStatus.FAILED,
+                decision=request.decision,
+                experiment=None,
+                safety_gate=None,
+                reason=(
+                    "The requested experiment "
+                    "does not exist."
+                ),
+            )
 
         if experiment is None:
             return EvolutionReport(
@@ -189,21 +203,32 @@ class EvolutionEngine:
                 ),
             )
 
-        verification_passed = sandbox_report.success
+        verification_passed = (
+            sandbox_report.success
+            and all(
+                result.passed
+                for result in sandbox_report.results
+            )
+        )
 
         resource_limits_passed = (
-            sandbox_report.sandbox_status == "passed"
+            sandbox_report.sandbox_status
+            == "passed"
         )
 
         safety_result = self.safety_gate.evaluate(
-            verification_passed=verification_passed,
+            verification_passed=(
+                verification_passed
+            ),
             resource_limits_passed=(
                 resource_limits_passed
             ),
             regression_passed=(
                 request.regression_passed
             ),
-            policy_passed=request.policy_passed,
+            policy_passed=(
+                request.policy_passed
+            ),
             evidence={
                 "decision_target": (
                     request.decision.target
@@ -256,6 +281,9 @@ class EvolutionEngine:
     ):
         """Return a registered experiment if it exists."""
 
-        return experiment_engine.get(
-            experiment_id
-    )
+        try:
+            return experiment_engine.get(
+                experiment_id
+            )
+        except KeyError:
+            return None
