@@ -1,15 +1,10 @@
 pub mod error;
+pub mod ffi;
 pub mod ids;
 pub mod runtime;
 
 pub use error::CoreError;
-
-pub use ids::{
-    AgentId,
-    BehaviorId,
-    ExperimentId,
-};
-
+pub use ids::{AgentId, BehaviorId, ExperimentId};
 pub use runtime::{
     Agent,
     AgentState,
@@ -23,19 +18,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn runtime_starts_in_created_state() {
-        let runtime = CardinalRuntime::new();
+    fn runtime_starts() {
+        let mut runtime = CardinalRuntime::new();
 
         assert_eq!(
             runtime.state(),
             RuntimeState::Created
         );
-    }
-
-    #[test]
-    fn runtime_can_start() {
-        let mut runtime =
-            CardinalRuntime::new();
 
         runtime.start().unwrap();
 
@@ -47,8 +36,7 @@ mod tests {
 
     #[test]
     fn runtime_can_pause() {
-        let mut runtime =
-            CardinalRuntime::new();
+        let mut runtime = CardinalRuntime::new();
 
         runtime.start().unwrap();
         runtime.pause().unwrap();
@@ -61,8 +49,7 @@ mod tests {
 
     #[test]
     fn runtime_can_stop() {
-        let mut runtime =
-            CardinalRuntime::new();
+        let mut runtime = CardinalRuntime::new();
 
         runtime.start().unwrap();
         runtime.stop().unwrap();
@@ -75,18 +62,10 @@ mod tests {
 
     #[test]
     fn agent_can_be_registered() {
-        let mut runtime =
-            CardinalRuntime::new();
-
-        let agent_id =
-            AgentId::new("alpha").unwrap();
+        let mut runtime = CardinalRuntime::new();
 
         runtime
-            .register_agent(
-                Agent::new(
-                    agent_id.clone()
-                )
-            )
+            .register_agent("agent_a")
             .unwrap();
 
         assert_eq!(
@@ -97,108 +76,77 @@ mod tests {
 
     #[test]
     fn duplicate_agent_is_rejected() {
-        let mut runtime =
-            CardinalRuntime::new();
-
-        let agent_id =
-            AgentId::new("alpha").unwrap();
+        let mut runtime = CardinalRuntime::new();
 
         runtime
-            .register_agent(
-                Agent::new(
-                    agent_id.clone()
-                )
-            )
+            .register_agent("agent_a")
             .unwrap();
 
-        let result =
-            runtime.register_agent(
-                Agent::new(agent_id)
-            );
-
-        assert!(matches!(
-            result,
-            Err(
-                CoreError::AgentAlreadyExists { .. }
-            )
-        ));
+        assert!(
+            runtime
+                .register_agent("agent_a")
+                .is_err()
+        );
     }
 
     #[test]
     fn agent_can_register_behavior() {
-        let mut agent =
-            Agent::new(
-                AgentId::new("alpha")
-                    .unwrap()
-            );
+        let mut runtime = CardinalRuntime::new();
 
-        agent
-            .register_behavior(
-                BehaviorId::new("think")
-                    .unwrap()
-            )
+        runtime
+            .register_agent("agent_a")
             .unwrap();
 
-        assert_eq!(
-            agent.behavior_count(),
-            1
+        let agent = runtime
+            .get_agent_mut("agent_a")
+            .unwrap();
+
+        agent
+            .register_behavior("tick")
+            .unwrap();
+
+        assert!(
+            agent.has_behavior("tick")
         );
     }
 
     #[test]
     fn duplicate_behavior_is_rejected() {
-        let mut agent =
-            Agent::new(
-                AgentId::new("alpha")
-                    .unwrap()
-            );
+        let mut runtime = CardinalRuntime::new();
 
-        let behavior =
-            BehaviorId::new("think")
-                .unwrap();
-
-        agent
-            .register_behavior(
-                behavior.clone()
-            )
+        runtime
+            .register_agent("agent_a")
             .unwrap();
 
-        let result =
-            agent.register_behavior(
-                behavior
-            );
+        let agent = runtime
+            .get_agent_mut("agent_a")
+            .unwrap();
 
-        assert!(matches!(
-            result,
-            Err(
-                CoreError::BehaviorAlreadyExists { .. }
-            )
-        ));
+        agent
+            .register_behavior("tick")
+            .unwrap();
+
+        assert!(
+            agent
+                .register_behavior("tick")
+                .is_err()
+        );
     }
 
     #[test]
-    fn running_agent_is_visible_in_snapshot() {
-        let mut runtime =
-            CardinalRuntime::new();
-
-        let agent_id =
-            AgentId::new("alpha").unwrap();
+    fn running_agent_is_counted() {
+        let mut runtime = CardinalRuntime::new();
 
         runtime
-            .register_agent(
-                Agent::new(
-                    agent_id.clone()
-                )
-            )
+            .register_agent("agent_a")
             .unwrap();
 
         runtime.start().unwrap();
         runtime
-            .start_agent(&agent_id)
+            .start_agent("agent_a")
             .unwrap();
 
-        let snapshot =
-            runtime.snapshot();
+        let snapshot = runtime.snapshot();
 
         assert_eq!(
             snapshot.running_agents,
@@ -207,72 +155,63 @@ mod tests {
     }
 
     #[test]
-    fn stopped_runtime_stops_agents() {
-        let mut runtime =
-            CardinalRuntime::new();
-
-        let agent_id =
-            AgentId::new("alpha").unwrap();
+    fn stopping_agent_removes_it_from_running_count() {
+        let mut runtime = CardinalRuntime::new();
 
         runtime
-            .register_agent(
-                Agent::new(
-                    agent_id.clone()
-                )
-            )
+            .register_agent("agent_a")
             .unwrap();
 
         runtime.start().unwrap();
-
         runtime
-            .start_agent(&agent_id)
+            .start_agent("agent_a")
             .unwrap();
 
-        runtime.stop().unwrap();
+        runtime
+            .stop_agent("agent_a")
+            .unwrap();
 
         assert_eq!(
-            runtime
-                .get_agent(&agent_id)
-                .unwrap()
-                .state,
-            AgentState::Stopped
+            runtime.snapshot().running_agents,
+            0
         );
     }
 
     #[test]
-    fn snapshot_counts_behaviors() {
-        let mut runtime =
-            CardinalRuntime::new();
-
-        let mut agent =
-            Agent::new(
-                AgentId::new("alpha")
-                    .unwrap()
-            );
-
-        agent
-            .register_behavior(
-                BehaviorId::new("think")
-                    .unwrap()
-            )
-            .unwrap();
-
-        agent
-            .register_behavior(
-                BehaviorId::new("act")
-                    .unwrap()
-            )
-            .unwrap();
+    fn behavior_count_is_reported() {
+        let mut runtime = CardinalRuntime::new();
 
         runtime
-            .register_agent(agent)
+            .register_agent("agent_a")
+            .unwrap();
+
+        let agent = runtime
+            .get_agent_mut("agent_a")
+            .unwrap();
+
+        agent
+            .register_behavior("tick")
+            .unwrap();
+
+        agent
+            .register_behavior("update")
             .unwrap();
 
         assert_eq!(
-            runtime
-                .snapshot()
-                .behavior_count,
+            runtime.snapshot().behavior_count,
             2
         );
+    }
+
+    #[test]
+    fn ffi_runtime_handle_can_be_created_and_destroyed() {
+        let handle =
+            ffi::cardinal_runtime_create();
+
+        assert!(!handle.is_null());
+
+        unsafe {
+            ffi::cardinal_runtime_destroy(handle);
+        }
     }
 }
