@@ -8,7 +8,6 @@ from .decision import (
     RuntimeDecision,
 )
 from .experiment import (
-    Experiment,
     ExperimentEngine,
     SandboxExperimentReport,
 )
@@ -138,7 +137,7 @@ class EvolutionEngine:
                 ),
             )
 
-        if request.decision.requires_verification is False:
+        if not request.decision.requires_verification:
             return EvolutionReport(
                 identifier=request.identifier,
                 status=EvolutionStatus.BLOCKED,
@@ -190,19 +189,14 @@ class EvolutionEngine:
                 ),
             )
 
-        verification_passed = (
-            sandbox_report.success
-        )
+        verification_passed = sandbox_report.success
 
         resource_limits_passed = (
-            sandbox_report.sandbox_status
-            == "passed"
+            sandbox_report.sandbox_status == "passed"
         )
 
         safety_result = self.safety_gate.evaluate(
-            verification_passed=(
-                verification_passed
-            ),
+            verification_passed=verification_passed,
             resource_limits_passed=(
                 resource_limits_passed
             ),
@@ -259,12 +253,9 @@ class EvolutionEngine:
     def experiment_for(
         experiment_engine: ExperimentEngine,
         experiment_id: str,
-    ) -> Experiment | None:
-        """
-        Convenience accessor for explicitly registered
-        experiments.
-        """
+    ):
+        """Return a registered experiment if it exists."""
 
         return experiment_engine.get(
             experiment_id
-      )
+    )
