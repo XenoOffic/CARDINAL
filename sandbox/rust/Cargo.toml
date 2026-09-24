@@ -1,0 +1,12 @@
+[package]
+name = "cardinal-sandbox"
+version = "0.1.0"
+edition = "2021"
+description = "Controlled sandbox core for CARDINAL"
+license = "MIT"
+
+[lib]
+name = "cardinal_sandbox"
+path = "src/lib.rs"
+
+[dependencies]
