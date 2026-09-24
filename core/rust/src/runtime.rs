@@ -1,22 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
-use serde::{Deserialize, Serialize};
-
 use crate::error::CoreError;
-use crate::ids::{
-    AgentId,
-    BehaviorId,
-};
+use crate::ids::{AgentId, BehaviorId};
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeState {
     Created,
     Running,
@@ -24,15 +11,7 @@ pub enum RuntimeState {
     Stopped,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AgentState {
     Created,
     Ready,
@@ -41,29 +20,28 @@ pub enum AgentState {
     Stopped,
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Clone)]
 pub struct Agent {
-    pub id: AgentId,
-    pub state: AgentState,
+    id: AgentId,
+    state: AgentState,
     behaviors: HashSet<BehaviorId>,
 }
 
 impl Agent {
-    pub fn new(
-        id: AgentId,
-    ) -> Self {
+    pub fn new(id: AgentId) -> Self {
         Self {
             id,
             state: AgentState::Created,
             behaviors: HashSet::new(),
         }
+    }
+
+    pub fn id(&self) -> &AgentId {
+        &self.id
+    }
+
+    pub fn state(&self) -> AgentState {
+        self.state
     }
 
     pub fn register_behavior(
@@ -73,11 +51,13 @@ impl Agent {
         if !self.behaviors.insert(behavior.clone()) {
             return Err(
                 CoreError::BehaviorAlreadyExists {
-                    behavior: behavior
-                        .as_str()
-                        .to_string(),
-                }
+                    behavior: behavior.as_str().to_string(),
+                },
             );
+        }
+
+        if self.state == AgentState::Created {
+            self.state = AgentState::Ready;
         }
 
         Ok(())
@@ -102,14 +82,7 @@ impl Agent {
     }
 }
 
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeSnapshot {
     pub state: RuntimeState,
     pub agent_count: usize,
@@ -117,6 +90,7 @@ pub struct RuntimeSnapshot {
     pub behavior_count: usize,
 }
 
+#[derive(Debug, Default)]
 pub struct CardinalRuntime {
     state: RuntimeState,
     agents: HashMap<AgentId, Agent>,
@@ -137,7 +111,6 @@ impl CardinalRuntime {
     pub fn start(&mut self) -> Result<(), CoreError> {
         match self.state {
             RuntimeState::Created
-            | RuntimeState::Stopped
             | RuntimeState::Paused => {
                 self.state = RuntimeState::Running;
                 Ok(())
@@ -150,58 +123,84 @@ impl CardinalRuntime {
                             .to_string(),
                 })
             }
+
+            RuntimeState::Stopped => {
+                Err(CoreError::InvalidState {
+                    message:
+                        "stopped runtime cannot be started"
+                            .to_string(),
+                })
+            }
         }
     }
 
     pub fn pause(&mut self) -> Result<(), CoreError> {
-        if self.state != RuntimeState::Running {
-            return Err(
-                CoreError::InvalidState {
-                    message:
-                        "only a running runtime can be paused"
-                            .to_string(),
+        match self.state {
+            RuntimeState::Running => {
+                self.state = RuntimeState::Paused;
+
+                for agent in self.agents.values_mut() {
+                    if agent.state() == AgentState::Running {
+                        agent.set_state(
+                            AgentState::Paused
+                        );
+                    }
                 }
-            );
+
+                Ok(())
+            }
+
+            RuntimeState::Paused => {
+                Err(CoreError::InvalidState {
+                    message:
+                        "runtime is already paused"
+                            .to_string(),
+                })
+            }
+
+            _ => Err(CoreError::InvalidState {
+                message:
+                    "runtime must be running to pause"
+                        .to_string(),
+            }),
         }
-
-        self.state = RuntimeState::Paused;
-
-        Ok(())
     }
 
     pub fn stop(&mut self) -> Result<(), CoreError> {
-        if self.state == RuntimeState::Created {
-            return Err(
-                CoreError::InvalidState {
+        match self.state {
+            RuntimeState::Stopped => {
+                Err(CoreError::InvalidState {
                     message:
-                        "cannot stop a runtime that has not started"
+                        "runtime is already stopped"
                             .to_string(),
+                })
+            }
+
+            _ => {
+                self.state = RuntimeState::Stopped;
+
+                for agent in self.agents.values_mut() {
+                    agent.set_state(
+                        AgentState::Stopped
+                    );
                 }
-            );
+
+                Ok(())
+            }
         }
-
-        self.state = RuntimeState::Stopped;
-
-        for agent in self.agents.values_mut() {
-            agent.set_state(
-                AgentState::Stopped
-            );
-        }
-
-        Ok(())
     }
 
     pub fn register_agent(
         &mut self,
         agent: Agent,
     ) -> Result<(), CoreError> {
-        let id = agent.id.clone();
+        let id = agent.id().clone();
 
         if self.agents.contains_key(&id) {
             return Err(
                 CoreError::AgentAlreadyExists {
                     agent: id.as_str().to_string(),
-                }
+                },
             );
         }
 
@@ -237,22 +236,42 @@ impl CardinalRuntime {
         id: &AgentId,
     ) -> Result<(), CoreError> {
         if self.state != RuntimeState::Running {
-            return Err(
-                CoreError::InvalidState {
-                    message:
-                        "runtime must be running before starting an agent"
-                            .to_string(),
-                }
-            );
+            return Err(CoreError::InvalidState {
+                message:
+                    "runtime must be running to start an agent"
+                        .to_string(),
+            });
         }
 
         let agent = self.get_agent_mut(id)?;
 
-        agent.set_state(
-            AgentState::Running
-        );
+        match agent.state() {
+            AgentState::Created
+            | AgentState::Ready
+            | AgentState::Paused => {
+                agent.set_state(
+                    AgentState::Running
+                );
 
-        Ok(())
+                Ok(())
+            }
+
+            AgentState::Running => {
+                Err(CoreError::InvalidState {
+                    message:
+                        "agent is already running"
+                            .to_string(),
+                })
+            }
+
+            AgentState::Stopped => {
+                Err(CoreError::InvalidState {
+                    message:
+                        "stopped agent cannot be started"
+                            .to_string(),
+                })
+            }
+        }
     }
 
     pub fn stop_agent(
@@ -261,30 +280,33 @@ impl CardinalRuntime {
     ) -> Result<(), CoreError> {
         let agent = self.get_agent_mut(id)?;
 
-        agent.set_state(
-            AgentState::Stopped
-        );
+        if agent.state() == AgentState::Stopped {
+            return Err(CoreError::InvalidState {
+                message:
+                    "agent is already stopped"
+                        .to_string(),
+            });
+        }
+
+        agent.set_state(AgentState::Stopped);
 
         Ok(())
     }
 
-    pub fn snapshot(
-        &self,
-    ) -> RuntimeSnapshot {
-        let running_agents = self
-            .agents
-            .values()
-            .filter(|agent| {
-                agent.state
-                    == AgentState::Running
-            })
-            .count();
-
+    pub fn snapshot(&self) -> RuntimeSnapshot {
         let behavior_count = self
             .agents
             .values()
             .map(Agent::behavior_count)
             .sum();
+
+        let running_agents = self
+            .agents
+            .values()
+            .filter(|agent| {
+                agent.state() == AgentState::Running
+            })
+            .count();
 
         RuntimeSnapshot {
             state: self.state,
@@ -292,11 +314,5 @@ impl CardinalRuntime {
             running_agents,
             behavior_count,
         }
-    }
-}
-
-impl Default for CardinalRuntime {
-    fn default() -> Self {
-        Self::new()
     }
 }
