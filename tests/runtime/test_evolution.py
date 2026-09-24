@@ -293,6 +293,10 @@ def test_missing_experiment_fails_cleanly():
     assert report.status == EvolutionStatus.FAILED
     assert report.experiment is None
     assert report.safety_gate is None
+    assert report.reason == (
+        "The requested experiment "
+        "does not exist."
+    )
 
 
 def test_evolution_requires_verification():
@@ -358,19 +362,26 @@ def test_evolution_report_preserves_decision():
 
 
 def test_evolution_is_deterministic():
-    engine = make_experiment_engine()
-    evolution = EvolutionEngine(engine)
+    first_engine = make_experiment_engine()
+    first_evolution = EvolutionEngine(
+        first_engine
+    )
+
+    second_engine = make_experiment_engine()
+    second_evolution = EvolutionEngine(
+        second_engine
+    )
 
     request = make_request()
 
-    first = evolution.evolve(
+    first = first_evolution.evolve(
         request,
         bridge=FakeBridge(),
         limits=make_limits(),
         execution=make_execution(),
     )
 
-    second = evolution.evolve(
+    second = second_evolution.evolve(
         request,
         bridge=FakeBridge(),
         limits=make_limits(),
