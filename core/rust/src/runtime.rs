@@ -80,6 +80,10 @@ impl Agent {
         self.behaviors.contains_key(behavior_id.as_str())
     }
 
+    pub fn behavior_count(&self) -> usize {
+        self.behaviors.len()
+    }
+
     pub fn start(&mut self) -> Result<(), CoreError> {
         match self.state {
             AgentState::Created | AgentState::Ready | AgentState::Paused => {
@@ -117,6 +121,16 @@ impl Agent {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeSnapshot {
+    pub state: RuntimeState,
+    pub agent_count: usize,
+    pub running_agents: usize,
+    pub paused_agents: usize,
+    pub stopped_agents: usize,
+    pub behavior_count: usize,
+}
+
 #[derive(Debug)]
 pub struct CardinalRuntime {
     state: RuntimeState,
@@ -139,6 +153,33 @@ impl CardinalRuntime {
 
     pub fn state(&self) -> RuntimeState {
         self.state
+    }
+
+    pub fn snapshot(&self) -> RuntimeSnapshot {
+        let mut running_agents = 0;
+        let mut paused_agents = 0;
+        let mut stopped_agents = 0;
+        let mut behavior_count = 0;
+
+        for agent in self.agents.values() {
+            match agent.state() {
+                AgentState::Running => running_agents += 1,
+                AgentState::Paused => paused_agents += 1,
+                AgentState::Stopped => stopped_agents += 1,
+                AgentState::Created | AgentState::Ready => {}
+            }
+
+            behavior_count += agent.behavior_count();
+        }
+
+        RuntimeSnapshot {
+            state: self.state,
+            agent_count: self.agents.len(),
+            running_agents,
+            paused_agents,
+            stopped_agents,
+            behavior_count,
+        }
     }
 
     pub fn register_agent(&mut self, agent: Agent) -> Result<(), CoreError> {
@@ -235,6 +276,7 @@ mod tests {
     #[test]
     fn runtime_starts_in_created_state() {
         let runtime = CardinalRuntime::new();
+
         assert_eq!(runtime.state(), RuntimeState::Created);
     }
 
@@ -275,12 +317,17 @@ mod tests {
         runtime.register_agent(agent).unwrap();
 
         let id = AgentId::new("test-agent").unwrap();
-        assert_eq!(runtime.get_agent(&id).unwrap().state(), AgentState::Created);
+
+        assert_eq!(
+            runtime.get_agent(&id).unwrap().state(),
+            AgentState::Created
+        );
     }
 
     #[test]
     fn duplicate_agent_is_rejected() {
         let mut runtime = CardinalRuntime::new();
+
         let agent = Agent::new(AgentId::new("test-agent").unwrap());
         let duplicate = Agent::new(AgentId::new("test-agent").unwrap());
 
@@ -301,12 +348,14 @@ mod tests {
             .unwrap();
 
         assert!(agent.has_behavior(&BehaviorId::new("tick").unwrap()));
+        assert_eq!(agent.behavior_count(), 1);
         assert_eq!(agent.state(), AgentState::Ready);
     }
 
     #[test]
     fn agent_can_start() {
         let mut runtime = CardinalRuntime::new();
+
         runtime
             .register_agent(Agent::new(AgentId::new("agent").unwrap()))
             .unwrap();
@@ -314,6 +363,7 @@ mod tests {
         runtime.start().unwrap();
 
         let id = AgentId::new("agent").unwrap();
+
         runtime.start_agent(&id).unwrap();
 
         assert_eq!(
@@ -325,6 +375,7 @@ mod tests {
     #[test]
     fn agent_cannot_start_before_runtime() {
         let mut runtime = CardinalRuntime::new();
+
         runtime
             .register_agent(Agent::new(AgentId::new("agent").unwrap()))
             .unwrap();
@@ -348,6 +399,7 @@ mod tests {
         runtime.start().unwrap();
 
         let id = AgentId::new("agent").unwrap();
+
         runtime.start_agent(&id).unwrap();
         runtime.stop().unwrap();
 
@@ -355,5 +407,43 @@ mod tests {
             runtime.get_agent(&id).unwrap().state(),
             AgentState::Stopped
         );
+    }
+
+    #[test]
+    fn snapshot_counts_agents_and_behaviors() {
+        let mut runtime = CardinalRuntime::new();
+
+        let mut first = Agent::new(AgentId::new("first").unwrap());
+        first
+            .register_behavior(BehaviorId::new("tick").unwrap())
+            .unwrap();
+
+        let mut second = Agent::new(AgentId::new("second").unwrap());
+        second
+            .register_behavior(BehaviorId::new("work").unwrap())
+            .unwrap();
+        second
+            .register_behavior(BehaviorId::new("stop").unwrap())
+            .unwrap();
+
+        runtime.register_agent(first).unwrap();
+        runtime.register_agent(second).unwrap();
+
+        runtime.start().unwrap();
+
+        let first_id = AgentId::new("first").unwrap();
+        let second_id = AgentId::new("second").unwrap();
+
+        runtime.start_agent(&first_id).unwrap();
+        runtime.start_agent(&second_id).unwrap();
+
+        let snapshot = runtime.snapshot();
+
+        assert_eq!(snapshot.state, RuntimeState::Running);
+        assert_eq!(snapshot.agent_count, 2);
+        assert_eq!(snapshot.running_agents, 2);
+        assert_eq!(snapshot.paused_agents, 0);
+        assert_eq!(snapshot.stopped_agents, 0);
+        assert_eq!(snapshot.behavior_count, 3);
     }
 }
