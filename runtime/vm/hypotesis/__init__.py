@@ -51,7 +51,6 @@ __all__ = [
     "Evidence",
     "EvidenceSet",
     "EvidenceType",
-    "GeneratedCandidate",
     "HypothesisStatus",
     "HypothesisType",
     "RankedHypothesis",
