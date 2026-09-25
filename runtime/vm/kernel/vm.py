@@ -3,7 +3,6 @@ from __future__ import annotations
 from compiler.ir import IRAgent, IRFunction, IRModule
 
 from ..agents import (
-    AgentContext,
     AgentEvent,
     AgentInstance,
     AgentLifecycle,
@@ -34,7 +33,6 @@ class VM:
         self.scheduler = Scheduler()
 
         self.observability = RuntimeHistory()
-
         self.intelligence = RuntimeIntelligence(
             self.observability
         )
@@ -42,30 +40,11 @@ class VM:
         self.limits = ExecutionLimits()
 
         self._instruction_budget: int | None = None
-        self._execution_instruction_count: int = 0
+        self._execution_instruction_count = 0
 
         self.execution = ExecutionEngine(self)
         self.calls = CallExecutor(self)
         self.dispatch = DispatchEngine(self)
-
-    # ------------------------------------------------------------------
-    # Compatibility state
-    # ------------------------------------------------------------------
-
-    @property
-    def _execution_instruction_count(self) -> int:
-        return self.__execution_instruction_count
-
-    @_execution_instruction_count.setter
-    def _execution_instruction_count(
-        self,
-        value: int,
-    ) -> None:
-        self.__execution_instruction_count = value
-
-    # ------------------------------------------------------------------
-    # Observability
-    # ------------------------------------------------------------------
 
     def _record_runtime_event(
         self,
@@ -87,10 +66,6 @@ class VM:
             source=source,
             metadata=metadata,
         )
-
-    # ------------------------------------------------------------------
-    # Runtime intelligence
-    # ------------------------------------------------------------------
 
     def runtime_snapshot(self):
         return self.intelligence.snapshot()
@@ -122,10 +97,6 @@ class VM:
     def detect_runtime_patterns(self):
         return self.intelligence.detect_patterns()
 
-    # ------------------------------------------------------------------
-    # Core execution
-    # ------------------------------------------------------------------
-
     def execute(
         self,
         function: IRFunction,
@@ -134,10 +105,10 @@ class VM:
         self.frames.clear()
         self.return_value = None
         self.current_agent = None
+
         self._instruction_budget = None
         self._execution_instruction_count = 0
-
-        self.limits.instruction_budget = None
+        self.limits.set_budget(None)
 
         frame = CallFrame(
             function_name=function.name
@@ -163,17 +134,14 @@ class VM:
         finally:
             self.frames.clear()
             self.current_agent = None
+
             self._instruction_budget = None
             self._execution_instruction_count = 0
-            self.limits.instruction_budget = None
+            self.limits.set_budget(None)
 
         self.return_value = result
 
         return result
-
-    # ------------------------------------------------------------------
-    # Agent lifecycle
-    # ------------------------------------------------------------------
 
     def spawn_agent(
         self,
@@ -259,10 +227,6 @@ class VM:
 
         return None
 
-    # ------------------------------------------------------------------
-    # Capabilities
-    # ------------------------------------------------------------------
-
     def grant_capability(
         self,
         instance: AgentInstance,
@@ -286,20 +250,13 @@ class VM:
             capability
         )
 
-    # ------------------------------------------------------------------
-    # Memory
-    # ------------------------------------------------------------------
-
     def remember(
         self,
         instance: AgentInstance,
         key: str,
         value: object,
     ) -> None:
-        instance.remember(
-            key,
-            value,
-        )
+        instance.remember(key, value)
 
     def recall(
         self,
@@ -318,10 +275,6 @@ class VM:
         key: str,
     ) -> None:
         instance.forget(key)
-
-    # ------------------------------------------------------------------
-    # Event system
-    # ------------------------------------------------------------------
 
     def bind_behavior(
         self,
@@ -411,10 +364,6 @@ class VM:
 
         return results
 
-    # ------------------------------------------------------------------
-    # Messaging
-    # ------------------------------------------------------------------
-
     def send_message(
         self,
         sender: AgentInstance,
@@ -427,13 +376,14 @@ class VM:
             "messaging.send"
         )
 
-        if isinstance(
-            recipient,
-            AgentInstance,
-        ):
-            recipient_name = recipient.name
-        else:
-            recipient_name = recipient
+        recipient_name = (
+            recipient.name
+            if isinstance(
+                recipient,
+                AgentInstance,
+            )
+            else recipient
+        )
 
         target = self.get_agent(
             recipient_name
@@ -555,10 +505,6 @@ class VM:
             module,
         )
 
-    # ------------------------------------------------------------------
-    # Scheduler
-    # ------------------------------------------------------------------
-
     def tick(
         self,
         module: IRModule | None = None,
@@ -582,17 +528,14 @@ class VM:
             if agent.event_queue:
                 return True
 
-            if (
+            return (
                 self.message_bus.pending(
                     agent.name
                 ) > 0
                 and agent.context.has_capability(
                     "messaging.receive"
                 )
-            ):
-                return True
-
-            return False
+            )
 
         agent_name = self.scheduler.next_agent(
             has_work
@@ -663,10 +606,6 @@ class VM:
 
         return executed
 
-    # ------------------------------------------------------------------
-    # Behavior execution
-    # ------------------------------------------------------------------
-
     def execute_behavior(
         self,
         instance: AgentInstance,
@@ -715,11 +654,11 @@ class VM:
             instance.context.max_instructions
         )
 
-        self.limits.instruction_budget = (
+        self._execution_instruction_count = 0
+
+        self.limits.set_budget(
             self._instruction_budget
         )
-
-        self._execution_instruction_count = 0
 
         instance.context.current_behavior = (
             behavior_name
@@ -796,12 +735,12 @@ class VM:
                 previous_budget
             )
 
-            self.limits.instruction_budget = (
-                previous_budget
-            )
-
             self._execution_instruction_count = (
                 previous_count
+            )
+
+            self.limits.set_budget(
+                previous_budget
             )
 
             instance.context.current_behavior = (
@@ -811,11 +750,4 @@ class VM:
             instance.context.execution_depth = max(
                 0,
                 instance.context.execution_depth - 1,
-            )
-
-    # ------------------------------------------------------------------
-    # Runtime limits
-    # ------------------------------------------------------------------
-
-    def _consume_instruction_budget(self) -> None:
-        self.limits.consume()
+        )
