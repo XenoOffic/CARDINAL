@@ -1,17 +1,26 @@
 from __future__ import annotations
 
-from typing import Callable
+from typing import TYPE_CHECKING
 
-from compiler.ir import IRBehavior, IRFunction, IRModule, OpCode
+from compiler.ir import (
+    IRBehavior,
+    IRFunction,
+    IRInstruction,
+    IRModule,
+    OpCode,
+)
 
 from .errors import VMError
 from .frame import CallFrame
+
+if TYPE_CHECKING:
+    from .vm import VM
 
 
 class ExecutionEngine:
     """Executes CARDINAL IR instructions."""
 
-    def __init__(self, vm) -> None:
+    def __init__(self, vm: VM) -> None:
         self.vm = vm
 
     def execute_function(
@@ -40,7 +49,7 @@ class ExecutionEngine:
 
     def execute_instructions(
         self,
-        instructions,
+        instructions: list[IRInstruction],
         module: IRModule | None,
         frame: CallFrame,
     ) -> object | None:
@@ -48,326 +57,235 @@ class ExecutionEngine:
             frame.instruction_pointer
             < len(instructions)
         ):
-            self.vm.limits.consume()
-
             instruction = instructions[
                 frame.instruction_pointer
             ]
 
-            opcode = instruction.opcode
-            stack = frame.operand_stack
-
-            if opcode == OpCode.CONSTANT:
-                stack.append(instruction.operand)
-
-            elif opcode == OpCode.LOAD:
-                self._load(
-                    frame,
-                    instruction.operand,
-                )
-
-            elif opcode == OpCode.STORE:
-                self._store(
-                    frame,
-                    instruction.operand,
-                )
-
-            elif opcode == OpCode.ASSIGN:
-                self._assign(
-                    frame,
-                    instruction.operand,
-                )
-
-            elif opcode == OpCode.ENTER_SCOPE:
-                frame.enter_scope()
-
-            elif opcode == OpCode.EXIT_SCOPE:
-                try:
-                    frame.exit_scope()
-                except RuntimeError as exc:
-                    raise VMError(
-                        str(exc)
-                    ) from exc
-
-            elif opcode == OpCode.ADD:
-                self._binary(
-                    frame,
-                    lambda a, b: a + b,
-                )
-
-            elif opcode == OpCode.SUB:
-                self._binary(
-                    frame,
-                    lambda a, b: a - b,
-                )
-
-            elif opcode == OpCode.MUL:
-                self._binary(
-                    frame,
-                    lambda a, b: a * b,
-                )
-
-            elif opcode == OpCode.DIV:
-                self._binary(
-                    frame,
-                    lambda a, b: a / b,
-                )
-
-            elif opcode == OpCode.MOD:
-                self._binary(
-                    frame,
-                    lambda a, b: a % b,
-                )
-
-            elif opcode == OpCode.NEGATE:
-                self._negate(frame)
-
-            elif opcode == OpCode.NOT:
-                self._not(frame)
-
-            elif opcode == OpCode.EQUAL:
-                self._binary(
-                    frame,
-                    lambda a, b: a == b,
-                )
-
-            elif opcode == OpCode.NOT_EQUAL:
-                self._binary(
-                    frame,
-                    lambda a, b: a != b,
-                )
-
-            elif opcode == OpCode.LESS:
-                self._binary(
-                    frame,
-                    lambda a, b: a < b,
-                )
-
-            elif opcode == OpCode.LESS_EQUAL:
-                self._binary(
-                    frame,
-                    lambda a, b: a <= b,
-                )
-
-            elif opcode == OpCode.GREATER:
-                self._binary(
-                    frame,
-                    lambda a, b: a > b,
-                )
-
-            elif opcode == OpCode.GREATER_EQUAL:
-                self._binary(
-                    frame,
-                    lambda a, b: a >= b,
-                )
-
-            elif opcode == OpCode.AND:
-                self._binary(
-                    frame,
-                    lambda a, b: a and b,
-                )
-
-            elif opcode == OpCode.OR:
-                self._binary(
-                    frame,
-                    lambda a, b: a or b,
-                )
-
-            elif opcode == OpCode.CALL:
-                result = self.vm.calls.call(
-                    instruction,
-                    module,
-                    frame,
-                )
-
-                if result is not None:
-                    stack.append(result)
-
-            elif opcode == OpCode.CALL_AGENT:
-                result = self.vm.calls.call_agent(
-                    instruction,
-                    module,
-                    frame,
-                )
-
-                if result is not None:
-                    stack.append(result)
-
-            elif opcode == OpCode.JUMP:
-                frame.instruction_pointer = int(
-                    instruction.operand
-                )
-                continue
-
-            elif opcode == OpCode.JUMP_IF_FALSE:
-                if not stack:
-                    raise VMError(
-                        "Stack underflow during JUMP_IF_FALSE"
-                    )
-
-                condition = stack.pop()
-
-                if not condition:
-                    frame.instruction_pointer = int(
-                        instruction.operand
-                    )
-                    continue
-
-            elif opcode == OpCode.RETURN:
-                result = (
-                    stack.pop()
-                    if stack
-                    else None
-                )
-
-                frame.return_value = result
-
-                if (
-                    self.vm.frames
-                    and self.vm.frames[-1] is frame
-                ):
-                    self.vm.frames.pop()
-
-                return result
-
-            elif opcode == OpCode.HALT:
-                return None
-
-            else:
-                raise VMError(
-                    f"Unsupported opcode: {opcode.name}"
-                )
-
             frame.instruction_pointer += 1
 
-        return frame.return_value
+            self.consume_instruction()
 
-    def _load(
+            result = self.execute_instruction(
+                instruction,
+                module,
+                frame,
+            )
+
+            if result is not _CONTINUE:
+                return result
+
+        return None
+
+    def consume_instruction(self) -> None:
+        self.vm.limits.consume()
+
+        self.vm._execution_instruction_count += 1
+
+        agent = self.vm.current_agent
+
+        if agent is not None:
+            agent.context.instructions_executed += 1
+
+    def execute_instruction(
         self,
+        instruction: IRInstruction,
+        module: IRModule | None,
         frame: CallFrame,
-        operand,
-    ) -> None:
-        name = operand
+    ) -> object:
+        opcode = instruction.opcode
+        operand = instruction.operand
 
-        if not isinstance(name, str):
-            raise VMError(
-                "LOAD requires a variable name"
+        if opcode == OpCode.CONSTANT:
+            frame.operand_stack.append(operand)
+            return _CONTINUE
+
+        if opcode == OpCode.LOAD:
+            frame.operand_stack.append(
+                frame.lookup(str(operand))
+            )
+            return _CONTINUE
+
+        if opcode == OpCode.STORE:
+            value = frame.operand_stack.pop()
+
+            frame.declare(
+                str(operand),
+                value,
             )
 
-        try:
-            value = frame.lookup(name)
-        except KeyError as exc:
-            raise VMError(
-                f"Undefined variable: {name}"
-            ) from exc
+            return _CONTINUE
 
-        frame.operand_stack.append(value)
+        if opcode == OpCode.ASSIGN:
+            value = frame.operand_stack.pop()
 
-    def _store(
-        self,
-        frame: CallFrame,
-        operand,
-    ) -> None:
-        if not frame.operand_stack:
-            raise VMError(
-                "Stack underflow during STORE"
+            frame.assign(
+                str(operand),
+                value,
             )
 
-        name = operand
+            return _CONTINUE
 
-        if not isinstance(name, str):
-            raise VMError(
-                "STORE requires a variable name"
-            )
+        if opcode == OpCode.ENTER_SCOPE:
+            frame.enter_scope()
+            return _CONTINUE
 
-        frame.declare(
-            name,
-            frame.operand_stack.pop(),
-        )
+        if opcode == OpCode.EXIT_SCOPE:
+            frame.exit_scope()
+            return _CONTINUE
 
-    def _assign(
-        self,
-        frame: CallFrame,
-        operand,
-    ) -> None:
-        if not frame.operand_stack:
-            raise VMError(
-                "Stack underflow during ASSIGN"
-            )
+        if opcode == OpCode.ADD:
+            self.binary("+", frame)
+            return _CONTINUE
 
-        name = operand
+        if opcode == OpCode.SUB:
+            self.binary("-", frame)
+            return _CONTINUE
 
-        if not isinstance(name, str):
-            raise VMError(
-                "ASSIGN requires a variable name"
-            )
+        if opcode == OpCode.MUL:
+            self.binary("*", frame)
+            return _CONTINUE
 
-        value = frame.operand_stack.pop()
+        if opcode == OpCode.DIV:
+            self.binary("/", frame)
+            return _CONTINUE
 
-        frame.assign(
-            name,
-            value,
-        )
+        if opcode == OpCode.MOD:
+            self.binary("%", frame)
+            return _CONTINUE
 
-    def _negate(
-        self,
-        frame: CallFrame,
-    ) -> None:
-        if not frame.operand_stack:
-            raise VMError(
-                "Stack underflow during NEGATE"
-            )
-
-        value = frame.operand_stack.pop()
-
-        try:
+        if opcode == OpCode.NEGATE:
+            value = frame.operand_stack.pop()
             frame.operand_stack.append(-value)
-        except Exception as exc:
-            raise VMError(
-                f"Unary negation failed: {exc}"
-            ) from exc
+            return _CONTINUE
 
-    def _not(
-        self,
-        frame: CallFrame,
-    ) -> None:
-        if not frame.operand_stack:
-            raise VMError(
-                "Stack underflow during NOT"
+        if opcode == OpCode.NOT:
+            value = frame.operand_stack.pop()
+            frame.operand_stack.append(not value)
+            return _CONTINUE
+
+        if opcode == OpCode.EQUAL:
+            self.binary("==", frame)
+            return _CONTINUE
+
+        if opcode == OpCode.NOT_EQUAL:
+            self.binary("!=", frame)
+            return _CONTINUE
+
+        if opcode == OpCode.LESS:
+            self.binary("<", frame)
+            return _CONTINUE
+
+        if opcode == OpCode.LESS_EQUAL:
+            self.binary("<=", frame)
+            return _CONTINUE
+
+        if opcode == OpCode.GREATER:
+            self.binary(">", frame)
+            return _CONTINUE
+
+        if opcode == OpCode.GREATER_EQUAL:
+            self.binary(">=", frame)
+            return _CONTINUE
+
+        if opcode == OpCode.AND:
+            self.binary("and", frame)
+            return _CONTINUE
+
+        if opcode == OpCode.OR:
+            self.binary("or", frame)
+            return _CONTINUE
+
+        if opcode == OpCode.CALL:
+            return self.vm.calls.call(
+                operand,
+                module,
+                frame,
             )
 
-        value = frame.operand_stack.pop()
+        if opcode == OpCode.CALL_AGENT:
+            return self.vm.calls.call_agent(
+                operand,
+                module,
+                frame,
+            )
 
-        frame.operand_stack.append(
-            not value
+        if opcode == OpCode.JUMP:
+            frame.instruction_pointer = int(
+                operand
+            )
+            return _CONTINUE
+
+        if opcode == OpCode.JUMP_IF_FALSE:
+            condition = frame.operand_stack.pop()
+
+            if not condition:
+                frame.instruction_pointer = int(
+                    operand
+                )
+
+            return _CONTINUE
+
+        if opcode == OpCode.RETURN:
+            if frame.operand_stack:
+                return frame.operand_stack.pop()
+
+            return None
+
+        if opcode == OpCode.HALT:
+            return frame.operand_stack[-1] if (
+                frame.operand_stack
+            ) else None
+
+        raise VMError(
+            f"Unsupported opcode: {opcode}"
         )
 
-    def _binary(
+    def binary(
         self,
+        operator: str,
         frame: CallFrame,
-        operation: Callable[
-            [object, object],
-            object,
-        ],
     ) -> None:
-        stack = frame.operand_stack
+        right = frame.operand_stack.pop()
+        left = frame.operand_stack.pop()
 
-        if len(stack) < 2:
+        if operator == "+":
+            result = left + right
+        elif operator == "-":
+            result = left - right
+        elif operator == "*":
+            result = left * right
+        elif operator == "/":
+            result = left / right
+        elif operator == "%":
+            result = left % right
+        elif operator == "==":
+            result = left == right
+        elif operator == "!=":
+            result = left != right
+        elif operator == "<":
+            result = left < right
+        elif operator == "<=":
+            result = left <= right
+        elif operator == ">":
+            result = left > right
+        elif operator == ">=":
+            result = left >= right
+        elif operator == "and":
+            result = bool(left and right)
+        elif operator == "or":
+            result = bool(left or right)
+        else:
             raise VMError(
-                "Stack underflow during binary operation"
+                f"Unsupported binary operator: "
+                f"{operator}"
             )
 
-        right = stack.pop()
-        left = stack.pop()
+        frame.operand_stack.append(result)
 
-        try:
-            result = operation(
-                left,
-                right,
-            )
-        except Exception as exc:
-            raise VMError(
-                f"Binary operation failed: {exc}"
-            ) from exc
 
-        stack.append(result)
+_CONTINUE = object()
+
+
+__all__ = [
+    "ExecutionEngine",
+        ]
