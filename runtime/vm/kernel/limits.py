@@ -13,9 +13,13 @@ class ExecutionLimits:
     instructions_executed: int = 0
 
     def __post_init__(self) -> None:
-        self.set_budget(
-            self.instruction_budget
-        )
+        if (
+            self.instruction_budget is not None
+            and self.instruction_budget <= 0
+        ):
+            raise ValueError(
+                "instruction_budget must be greater than zero."
+            )
 
     def set_budget(
         self,
@@ -32,9 +36,7 @@ class ExecutionLimits:
     def consume(self) -> None:
         self.instructions_executed += 1
 
-        if (
-            self.instruction_budget is None
-        ):
+        if self.instruction_budget is None:
             return
 
         if (
