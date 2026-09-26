@@ -477,9 +477,6 @@ class ExecutionEngine:
 
             ("agent_name", "function")
                 Call a function on another agent.
-
-        This preserves the compact IR representation while allowing
-        cross-agent invocation.
         """
         if isinstance(target, tuple):
             if len(target) != 2:
@@ -579,4 +576,4 @@ class ExecutionEngine:
 
 __all__ = [
     "ExecutionEngine",
-        ]
+            ]
